@@ -61,3 +61,5 @@ Bash
 terraform apply
 ```
 Terraform will automatically strip away the unauthorized manual rule and bring the security group back into compliance with your code.
+
+</b></details>
