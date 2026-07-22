@@ -58,7 +58,7 @@ Speak with the DBA or incident team. Ask: "Is this manual security group rule a 
 Path A: Keep the Manual Fix (Reconcile Code to Reality)
 If the security group rule change was necessary and needs to stay, update your .tf code to include the new security group rule. Then run terraform plan again. Once the plan shows No changes. Infrastructure matches configuration, you're synced up cleanly without touching live traffic.
 
-Path B: Revert the Manual Fix (Reconcile Reality to Code)
+**Path B**: Revert the Manual Fix (Reconcile Reality to Code)
 If the manual change was a temporary workaround or violated security policies, keep your code as-is and run:
 ```bash
 Bash
@@ -67,3 +67,60 @@ terraform apply
 Terraform will automatically strip away the unauthorized manual rule and bring the security group back into compliance with your code.
 
 </b></details>
+
+<details>
+  <summary>
+    
+### Scenario 2: The Module Refactoring Dilemma
+    
+Ready for the next scenario?
+
+Your team has a massive, single-file Terraform codebase (main.tf) that manages a production Kubernetes cluster, its node groups, VPC, and database. It's becoming unmaintainable.
+
+You are tasked with refactoring this codebase by moving the existing aws_db_instance.postgres resource out of main.tf and into a reusable local module named module.database.
+
+### Question:
+
+If you simply cut and paste the resource code into the new module directory and run terraform plan, what will Terraform try to do to your production database, and what specific Terraform feature or block should you use to refactor the code cleanly without causing downtime or recreation? 
+  </summary><br><b>
+    Here is what happens under the hood and how to handle it safely.
+
+**What Terraform Tries to Do** (The Trap)
+If you simply cut and paste the resource code from `main.tf` into `module.database` and run `terraform plan`, Terraform will try to DESTROY your production database and CREATE a new one.
+
+**Why does this happen?**
+Terraform tracks resources in its state file by their address (their exact hierarchical path in code):
+
+`Old Address in State: aws_db_instance.postgres`
+
+`New Address in Code: module.database.aws_db_instance.postgres`
+
+Because Terraform looks at the state file and sees that `aws_db_instance.postgres` is missing from the root file, it schedules it for deletion. Then, seeing a brand new `module.database.aws_db_instance.postgres` block, it schedules a creation.
+
+For a production database, this means data loss and major downtime.
+
+**The Solution**: Refactoring with the moved Block
+In modern Terraform (version 1.1+), you use a moved block directly in your HCL code to tell Terraform: "Hey, this isn't a new resource—we just renamed its address."
+
+**Step 1**: Update Your Code
+Move the resource code into your new module as planned, and then add a moved block at the root level of your code:
+
+Terraform
+moved {
+  from = aws_db_instance.postgres
+  to   = module.database.aws_db_instance.postgres
+}
+**Step 2**: Run terraform plan
+When you run terraform plan, instead of seeing 1 to add, 1 to destroy, Terraform reads the moved block and outputs:
+```text
+Plaintext
+# module.database.aws_db_instance.postgres has moved to module.database.aws_db_instance.postgres
+Plan: 0 to add, 0 to change, 0 to destroy.
+```
+**Step 3**: Run terraform apply
+Executing terraform apply updates the internal state file to point to the new address without touching the live database in AWS. Zero downtime, zero risk!
+
+**Legacy Method Note**: Before Terraform 1.1 introduced moved blocks, engineers had to manually run CLI commands like `terraform state mv aws_db_instance.postgres module.database.aws_db_instance.postgres`. Modern declarative moved blocks are vastly preferred because they can be committed to Git and executed automatically in team CI/CD pipelines.
+  </b>
+</details>
+
