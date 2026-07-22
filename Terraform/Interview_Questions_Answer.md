@@ -185,6 +185,7 @@ You are tasked with deploying a set of Azure Storage Accounts for 4 different en
 Instead of copying and pasting the azurerm_storage_account block 4 times, you decide to define a list variable in `variables.tf:`
 
 ``` Terraform
+
 variable "environments" {
   type    = list(string)
   default = ["dev", "staging", "qa", "prod"]
@@ -199,6 +200,41 @@ Should you use count (referencing count.index) or `for_each`?
 What unexpected behavior occurs if you used count and a team member removes "staging" from the middle of that variable list next week?
 
   </summary><br><b>
+
+Here is the exact explanation of why `for_each` is the industry standard and what goes wrong under the hood when using count.
+
+The Danger of Using `count` (Index-Based Tracking) When you use count, Terraform tracks resources internally in the state file using numeric array indices **(0, 1, 2, 3)**
+- `azurerm_storage_account.st[0]` $\rightarrow$ dev
+- `azurerm_storage_account.st[1]` $\rightarrow$ staging
+- `azurerm_storage_account.st[2]` $\rightarrow$ qa
+- `azurerm_storage_account.st[3]` $\rightarrow$ prod
+
+  What happens when "staging" is removed? If your variable list changes to ["dev", "qa", "prod"]:
+  - `azurerm_storage_account.st[0]` is still dev (No change).
+  - `azurerm_storage_account.st[1]` is now qa! (Terraform compares index 1 in state—which was staging—to index 1 in code—which is now qa. It sees a name change and schedules staging to be destroyed and replaced with qa).
+  - azurerm_storage_account.st[2] is now prod! (Terraform destroys the old qa at index 2 and replaces it with prod).
+  - azurerm_storage_account.st[3] no longer exists in code, so Terraform destroys the existing production Storage Account.
     
+    **The Result:** Removing an item from the middle of a count list causes a cascading destruction and recreation of all subsequent resources, resulting in catastrophic data loss in production!Why `for_each` Solves This (Key-Based Tracking) When you convert your list into a `set/map` and use `for_each`, Terraform tracks resources by their explicit key string rather than an index number:
+
+   `` Terraform
+  resource "azurerm_storage_account" "st" {
+  for_each             = toset(var.environments)
+  name                 = "st${each.key}appdata2026"
+  resource_group_name  = azurerm_resource_group.rg.name
+  location             = azurerm_resource_group.rg.location
+  account_tier         = "Standard"
+  account_replication_type = "LRS"
+}
+```
+Terraform addresses these resources in the state file as:
+
+- azurerm_storage_account.st["dev"]
+- azurerm_storage_account.st["staging"]
+- azurerm_storage_account.st["qa"]
+- azurerm_storage_account.st["prod"]
+
+If you remove "staging" from the list, Terraform looks at the keys in state versus code. It sees that ["dev"], ["qa"], and ["prod"] are completely untouched. It only deletes azurerm_storage_account.st["staging"], leaving all other environments completely safe!
+  
   </b>
 </details>
