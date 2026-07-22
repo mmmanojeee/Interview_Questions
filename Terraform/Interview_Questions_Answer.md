@@ -227,7 +227,7 @@ The Danger of Using `count` (Index-Based Tracking) When you use count, Terraform
   account_replication_type = "LRS"
   }
 ```
-
+---
 Terraform addresses these resources in the state file as:
 
 - azurerm_storage_account.st["dev"]
@@ -236,8 +236,6 @@ Terraform addresses these resources in the state file as:
 - azurerm_storage_account.st["prod"]
 
 If you remove "staging" from the list, Terraform looks at the keys in state versus code. It sees that ["dev"], ["qa"], and ["prod"] are completely untouched. It only deletes azurerm_storage_account.st["staging"], leaving all other environments completely safe.
-
+---
   </b>
 </details>
-
-
