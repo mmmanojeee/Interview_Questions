@@ -199,7 +199,9 @@ Should you use count (referencing count.index) or `for_each`?
 
 What unexpected behavior occurs if you used count and a team member removes "staging" from the middle of that variable list next week?
 
-  </summary><br><b>
+  </summary>
+  <br>
+  <b>
 
 Here is the exact explanation of why `for_each` is the industry standard and what goes wrong under the hood when using count.
 
@@ -227,7 +229,7 @@ The Danger of Using `count` (Index-Based Tracking) When you use count, Terraform
   account_replication_type = "LRS"
   }
 ```
----
+
 Terraform addresses these resources in the state file as:
 
 - azurerm_storage_account.st["dev"]
@@ -236,6 +238,7 @@ Terraform addresses these resources in the state file as:
 - azurerm_storage_account.st["prod"]
 
 If you remove "staging" from the list, Terraform looks at the keys in state versus code. It sees that ["dev"], ["qa"], and ["prod"] are completely untouched. It only deletes azurerm_storage_account.st["staging"], leaving all other environments completely safe.
----
+
   </b>
 </details>
+
