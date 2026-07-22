@@ -311,13 +311,21 @@ resource "azurerm_private_endpoint" "sql_endpoint" {
 ```
 
 Troubleshooting Step-by-Step When facing Private Endpoint DNS issues in Azure, follow this diagnostic checklist:
-- Check 'A' Record Creation: Go to the Azure Portal $\rightarrow$ Private DNS Zone (privatelink.database.windows.net). Check if an A record matching your SQL Server name (e.g., myserver) was automatically created. If it's missing, the `private_dns_zone_group` block is absent or misconfigured.
-- Verify VNet Link: Ensure the `azurerm_private_dns_zone_virtual_network_link` resource is bound to the same VNet where your App Service / VM resides.Test DNS Resolution from inside VNet: SSH or run a test terminal from a VM/Container inside the VNet:
+- **Check 'A' Record Creation:** Go to the Azure Portal $\rightarrow$ Private DNS Zone (privatelink.database.windows.net). Check if an A record matching your SQL Server name (e.g., myserver) was automatically created. If it's missing, the `private_dns_zone_group` block is absent or misconfigured.
+- **Verify VNet Link:** Ensure the `azurerm_private_dns_zone_virtual_network_link` resource is bound to the same VNet where your App Service / VM resides.Test DNS Resolution from inside VNet: SSH or run a test terminal from a VM/Container inside the VNet:
 ``` Powershell  
 nslookup myserver.database.windows.net
 ```
 - Correct Output: Resolves to a private IP (e.g., 10.0.2.4).
 - Incorrect Output: Resolves to a public IP or NXDOMAIN.
 
+  </b>
+</details>
+
+<details>
+  <summary>
+    
+  </summary><br><b>
+    
   </b>
 </details>
