@@ -219,7 +219,7 @@ The Danger of Using `count` (Index-Based Tracking) When you use count, Terraform
     
     **The Result:** Removing an item from the middle of a count list causes a cascading destruction and recreation of all subsequent resources, resulting in catastrophic data loss in production!Why `for_each` Solves This (Key-Based Tracking) When you convert your list into a `set/map` and use `for_each`, Terraform tracks resources by their explicit key string rather than an index number:
 
-  ``` Terraform
+  ```
   
   resource "azurerm_storage_account" "st" {
   for_each             = toset(var.environments)
