@@ -174,3 +174,31 @@ Use Identity-Based Access (IAM / OIDC):
 Where possible, avoid passwords entirely. Use IAM roles, IAM database authentication, or OIDC tokens so resources communicate using temporary, short-lived tokens instead of permanent passwords.
   </b>
 </details>
+
+<details>
+  <summary>
+    
+### Scenario 4 (Azure Edition): The List Iteration & Resource Destruction Risk
+
+You are tasked with deploying a set of Azure Storage Accounts for 4 different environments: dev, staging, qa, and prod.
+
+Instead of copying and pasting the azurerm_storage_account block 4 times, you decide to define a list variable in `variables.tf:`
+
+``` Terraform
+variable "environments" {
+  type    = list(string)
+  default = ["dev", "staging", "qa", "prod"]
+}
+```
+To create these Storage Accounts, you need to iterate over this list in your HCL code.
+
+**Question:**
+
+Should you use count (referencing count.index) or `for_each`?
+
+What unexpected behavior occurs if you used count and a team member removes "staging" from the middle of that variable list next week?
+
+  </summary><br><b>
+    
+  </b>
+</details>
