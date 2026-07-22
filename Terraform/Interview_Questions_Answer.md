@@ -230,7 +230,7 @@ The Danger of Using `count` (Index-Based Tracking) When you use count, Terraform
   account_replication_type = "LRS"
   }
   
-```
+...
 
 **Terraform addresses these resources in the state file as:**
 
