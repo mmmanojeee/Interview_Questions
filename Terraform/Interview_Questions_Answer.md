@@ -244,3 +244,80 @@ If you remove "staging" from the list, Terraform looks at the keys in state vers
   </b>
 </details>
 
+<details>
+  <summary>
+    
+### Scenario 5 (Azure): The Private Endpoint & DNS Outage
+Let's try our next scenario!
+
+Your enterprise security team mandates that your Azure SQL Database (azurerm_mssql_server) must be completely isolated from the public internet.
+
+To achieve this, you provision:
+
+An Azure SQL Server with `public_network_access_enabled = false`.
+
+An Azure Private Endpoint (azurerm_private_endpoint) connecting the database to your app's Virtual Network Subnet.
+
+A Private DNS Zone (azurerm_private_dns_zone for privatelink.database.windows.net) and a Private DNS Zone Virtual Network Link (azurerm_private_dns_zone_virtual_network_link).
+
+You run terraform apply. Everything deploys without syntax errors! However, your Azure App Service inside the VNet fails to connect to the Azure SQL Database, giving a DNS Resolution Error.
+
+Question:
+
+What critical resource or block are engineers frequently missing in Terraform when connecting Azure Private Endpoints to Azure Private DNS Zones, and how do you troubleshoot and fix this in HCL?
+
+  </summary><br><b>
+    
+### Answer 
+
+This is one of the most common setup traps when working with Azure Private Endpoints and Private DNS in Terraform!
+
+Here is why the connection fails and the exact missing piece required to fix it.
+The Root Cause: Missing Private DNS Zone Group
+When you create an Azure Private Endpoint (azurerm_private_endpoint), Azure allocates a Private IP address from your VNet subnet for that database.
+
+However, creating the Private Endpoint and the Private DNS Zone as separate resources is not enough. Terraform creates both, but it doesn't automatically register the Private Endpoint's new IP address inside your Private DNS Zone!
+
+As a result, when your application looks up `myserver.database.windows.net`, DNS still attempts to resolve to the public IP (which is blocked) or fails entirely, leading to a DNS resolution timeout.
+
+The Missing Terraform Resource Block
+To fix this, you must explicitly link the Private Endpoint to your Private DNS Zone using a `private_dns_zone_group` block directly nested inside the `azurerm_private_endpoint resource`.
+
+The Correct HCL Code Structure
+
+``` Terraform
+resource "azurerm_private_endpoint" "sql_endpoint" {
+  name                = "pe-sql-prod"
+  location            = azurerm_resource_group.rg.location
+  resource_group_name = azurerm_resource_group.rg.name
+  subnet_id           = azurerm_subnet.pe_subnet.id
+
+  private_service_connection {
+    name                           = "psc-sql-prod"
+    private_connection_resource_id = azurerm_mssql_server.sql.id
+    subresource_names              = ["sqlServer"]
+    is_manual_connection           = false
+  }
+
+  # CRITICAL MISSING BLOCK:
+  # This tells Azure to automatically add the 'A Record' into Private DNS
+  
+  private_dns_zone_group {
+    name                 = "sql-dns-zone-group"
+    private_dns_zone_ids = [azurerm_private_dns_zone.sql_dns.id]
+  }
+}
+
+```
+
+Troubleshooting Step-by-Step When facing Private Endpoint DNS issues in Azure, follow this diagnostic checklist:
+- Check 'A' Record Creation: Go to the Azure Portal $\rightarrow$ Private DNS Zone (privatelink.database.windows.net). Check if an A record matching your SQL Server name (e.g., myserver) was automatically created. If it's missing, the `private_dns_zone_group` block is absent or misconfigured.
+- Verify VNet Link: Ensure the `azurerm_private_dns_zone_virtual_network_link` resource is bound to the same VNet where your App Service / VM resides.Test DNS Resolution from inside VNet: SSH or run a test terminal from a VM/Container inside the VNet:
+``` Powershell  
+nslookup myserver.database.windows.net
+```
+- Correct Output: Resolves to a private IP (e.g., 10.0.2.4).
+- Incorrect Output: Resolves to a public IP or NXDOMAIN.
+
+  </b>
+</details>
