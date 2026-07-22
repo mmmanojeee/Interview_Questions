@@ -118,6 +118,7 @@ Plaintext
 Plan: 0 to add, 0 to change, 0 to destroy.
 ```
 **Step 3**: Run terraform apply
+
 Executing terraform apply updates the internal state file to point to the new address without touching the live database in AWS. Zero downtime, zero risk!
 
 **Legacy Method Note**: Before Terraform 1.1 introduced moved blocks, engineers had to manually run CLI commands like `terraform state mv aws_db_instance.postgres module.database.aws_db_instance.postgres`. Modern declarative moved blocks are vastly preferred because they can be committed to Git and executed automatically in team CI/CD pipelines.
