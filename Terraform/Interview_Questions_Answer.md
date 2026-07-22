@@ -125,3 +125,51 @@ Executing terraform apply updates the internal state file to point to the new ad
   </b>
 </details>
 
+<details>
+  <summary>
+    
+### Scenario 3: The Secret Leaks & State File Exposure
+Let's try one more scenario.
+
+You are provisioning an RDS Database and a TLS Certificate. You set the database password using a variable var.db_password, which is marked as sensitive = true.
+
+When a developer runs `terraform apply`, Terraform outputs db_password = (sensitive value) in the terminal, keeping it hidden from the logs.
+
+**Question:**
+
+Even though the variable is marked `sensitive = true` and hidden from terminal outputs, is the database password stored in plaintext inside the .tfstate file? If yes, how do you secure this credential in production?
+
+  </summary><br><b>
+    
+Here is the straightforward truth about how Terraform handles sensitive data.
+
+1. **Is the secret in plaintext in (.tfstate)?**
+ YES, absolutely.
+
+Marking a variable or output as `sensitive = true` only hides it from the terminal console and CI/CD logs. It does NOT encrypt the data inside the `.tfstate` file.
+
+If someone reads your `terraform.tfstate` JSON file, they will see the database password, private keys, API tokens, and connection strings written in clear, unencrypted text.
+
+2. **How to Secure Credentials in Production**
+Because the state file will naturally contain secrets, production security relies on protecting access to the state file and avoiding hardcoded secrets in Terraform code.
+
+**Strategy A:** Secure the State File at Rest
+*Remote Encrypted Backends*: Store state in a remote backend like AWS S3 with SSE-KMS encryption enabled at rest.
+
+*Strict IAM Policies*: Limit access to the S3 bucket using strict IAM policies, ensuring only the CI/CD service account (and minimal authorized personnel) can read the bucket.
+
+Enable Bucket Versioning: Keep versioning turned on in S3 so you can rollback if state gets corrupted.
+
+**Strategy B:** Avoid Passing Raw Secrets into Terraform
+Instead of generating or passing passwords into Terraform variables, delegate secret management to a dedicated secret service:
+
+**Auto-generate Secrets in AWS Secrets Manager / HashiCorp Vault:**
+Have Terraform provision a secret container in AWS Secrets Manager, but let Secrets Manager auto-generate a random password.
+
+**Use Dynamic Secrets via HashiCorp Vault Provider:**
+Use the Vault provider to fetch short-lived dynamic database credentials at runtime, so static passwords aren't stored long-term in state.
+
+Use Identity-Based Access (IAM / OIDC):
+Where possible, avoid passwords entirely. Use IAM roles, IAM database authentication, or OIDC tokens so resources communicate using temporary, short-lived tokens instead of permanent passwords.
+  </b>
+</details>
