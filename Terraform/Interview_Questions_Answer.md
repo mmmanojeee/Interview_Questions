@@ -20,9 +20,11 @@ How do you safely resolve the state lock issue, and what exact steps do you take
 </summary><br><b>
 
 ### Step 1: Resolving the State Lock
+
 When the pipeline crashed mid-run, Terraform didn't get the chance to release the lock on your state backend (e.g., AWS DynamoDB or Terraform Cloud).
 
 ### How to fix it:
+
 Verify no active processes are running: Check your CI/CD pipeline to ensure no hidden runner job is still actively trying to apply changes.
 
 Retrieve the Lock ID: Read the failure logs from the pipeline. Terraform will explicitly output a Lock ID (e.g., Lock Info: ID: 52a1b184-c89d-...).
@@ -35,9 +37,11 @@ terraform force-unlock <LOCK-ID>
 ### 🔖Safety Note: Never force unlock unless you are 100% sure no other team member or process is actively running terraform apply. Dual writes can permanently corrupt state files.
 
 ### Step 2: Detecting and Handling the Drift
+
 Now that the lock is cleared, you have a situation where the Cloud Console state (what actually exists in AWS) no longer matches the Terraform State or your Terraform Code.
 
 ### How to handle it safely:
+
 1. Detect the Drift (Dry Run)
 First, run a non-destructive plan to see exactly what Terraform sees:
 
