@@ -154,6 +154,7 @@ If someone reads your `terraform.tfstate` JSON file, they will see the database 
 Because the state file will naturally contain secrets, production security relies on protecting access to the state file and avoiding hardcoded secrets in Terraform code.
 
 **Strategy A:** Secure the State File at Rest
+
 *Remote Encrypted Backends*: Store state in a remote backend like AWS S3 with SSE-KMS encryption enabled at rest.
 
 *Strict IAM Policies*: Limit access to the S3 bucket using strict IAM policies, ensuring only the CI/CD service account (and minimal authorized personnel) can read the bucket.
