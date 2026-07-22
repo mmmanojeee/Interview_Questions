@@ -226,7 +226,7 @@ The Danger of Using `count` (Index-Based Tracking) When you use count, Terraform
   location             = azurerm_resource_group.rg.location
   account_tier         = "Standard"
   account_replication_type = "LRS"
-}
+  }
 
 ```
 
