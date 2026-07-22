@@ -232,7 +232,7 @@ The Danger of Using `count` (Index-Based Tracking) When you use count, Terraform
   
 ```
 
-Terraform addresses these resources in the state file as:
+**Terraform addresses these resources in the state file as:**
 
 - azurerm_storage_account.st["dev"]
 - azurerm_storage_account.st["staging"]
