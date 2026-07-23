@@ -325,7 +325,82 @@ nslookup myserver.database.windows.net
 <details>
   <summary>
     
+### Scenario 6 (Azure): Breaking Down Stacks with terraform_remote_state vs. Data Sources
+
+Ready for the next Azure scenario?
+Your company’s core platform team manages the foundation network using Terraform:
+	• Azure Virtual Network (VNet)
+	• Subnets, Network Security Groups (NSGs), and Route Tables
+Your application team is writing a separate Terraform codebase to deploy an Azure Virtual Machine Scale Set (VMSS) that needs to join one of those existing subnets.
+Question:
+To fetch the subnet_id created by the platform team into your application team's Terraform code, you can use either an `azurerm_subnet` data source or an `azurerm_remote_state` data source.
+What is the difference between these two approaches, and why do most Azure enterprise architectures prefer the standard Azure data source over terraform_remote_state?
+
   </summary><br><b>
+    
+### Answer
+
+This is a classic architecture design question that separates mid-level Terraform developers from senior cloud architects!
+Here is the exact difference between the two approaches and why enterprise teams favor one over the other.
+
+**1. azurerm_remote_state Data Source**
+   
+**How it works:**
+Your application team's Terraform code reaches directly into the Platform Team's remote .tfstate file stored in Azure Blob Storage to read output values.
+
+``` Terraform
+
+data "terraform_remote_state" "network" {
+  backend = "azurerm"
+  config = {
+    resource_group_name  = "rg-tfstate"
+    storage_account_name = "stplatformtfstate"
+    container_name       = "tfstate"
+    key                  = "networking.tfstate"
+  }
+}
+# Accessing the subnet ID:
+resource "azurerm_network_interface" "nic" {
+  # ...
+  ip_configuration {
+    subnet_id = data.terraform_remote_state.network.outputs.app_subnet_id
+  }
+}
+```
+
+**2. azurerm_subnet Azure Native Data Source**
+
+**How it works:**
+Your application team's Terraform code queries the Azure Resource Manager (ARM) API directly to look up the existing subnet by its name and resource group, completely bypassing the Platform Team's Terraform state file.
+
+``` Terraform
+
+data "azurerm_subnet" "app_subnet" {
+  name                 = "snet-app-prod"
+  virtual_network_name = "vnet-hub-prod"
+  resource_group_name  = "rg-networking-prod"
+}
+# Accessing the subnet ID:
+resource "azurerm_network_interface" "nic" {
+  # ...
+  ip_configuration {
+    subnet_id = data.azurerm_subnet.app_subnet.id
+  }
+}
+...
+
+Why Enterprise Azure Teams Avoid terraform_remote_state
+
+While terraform_remote_state seems convenient, it introduces major enterprise anti-patterns:
+
+	1. Tight Coupling & State File Bloat: Your application deployment pipeline now requires read access to the core networking team's state file. If the network team restructures their code, renames output variables, or moves their state bucket, your app pipeline breaks instantly.
+  
+	2. Security Risk (Blast Radius): State files often contain sensitive unencrypted data or secrets from other resources in that stack. Granting application teams access to the network team's .tfstate grants them visibility into infrastructure details they shouldn't need to see (violating the Principle of Least Privilege).
+  
+	3. RBAC Friction in Azure: With azurerm_remote_state, the app team needs Azure Storage Blob Data Reader permissions on the platform team's storage account. With native data sources, the app team only needs standard Reader access on the Azure VNet/Subnet resource itself via Azure RBAC.
+  
+	**Key Takeaway:** Native Azure data sources query live Azure cloud reality, making your stacks loosely coupled, vastly more secure, and resistant to state refactoring upstream.
+
     
   </b>
 </details>
