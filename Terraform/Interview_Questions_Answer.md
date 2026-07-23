@@ -397,14 +397,116 @@ Why Enterprise Azure Teams Avoid terraform_remote_state
 
 While terraform_remote_state seems convenient, it introduces major enterprise anti-patterns:
 
-	1. Tight Coupling & State File Bloat: Your application deployment pipeline now requires read access to the core networking team's state file. If the network team restructures their code, renames output variables, or moves their state bucket, your app pipeline breaks instantly.
-  
-	2. Security Risk (Blast Radius): State files often contain sensitive unencrypted data or secrets from other resources in that stack. Granting application teams access to the network team's .tfstate grants them visibility into infrastructure details they shouldn't need to see (violating the Principle of Least Privilege).
-  
-	3. RBAC Friction in Azure: With azurerm_remote_state, the app team needs Azure Storage Blob Data Reader permissions on the platform team's storage account. With native data sources, the app team only needs standard Reader access on the Azure VNet/Subnet resource itself via Azure RBAC.
+- Tight Coupling & State File Bloat: Your application deployment pipeline now requires read access to the core networking team's state file. If the network team restructures their code, renames output variables, or moves their state bucket, your app pipeline breaks instantly.
+- Security Risk (Blast Radius): State files often contain sensitive unencrypted data or secrets from other resources in that stack. Granting application teams access to the network team's .tfstate grants them visibility into infrastructure details they shouldn't need to see (violating the Principle of Least Privilege).
+- RBAC Friction in Azure: With azurerm_remote_state, the app team needs Azure Storage Blob Data Reader permissions on the platform team's storage account. With native data sources, the app team only needs standard Reader access on the Azure VNet/Subnet resource itself via Azure RBAC.
   
 	**Key Takeaway:** Native Azure data sources query live Azure cloud reality, making your stacks loosely coupled, vastly more secure, and resistant to state refactoring upstream.
 
     
   </b>
+</details>
+
+<details>
+	<summary>
+		
+### Scenario 7 (Azure): Multi-Region Azure Key Vault Deployment with Terraform
+		
+Ready for another high-impact Azure scenario?
+
+Your enterprise requires a active-passive multi-region setup in Azure (East US as Primary, West US as Secondary).
+You need to provision an Azure Key Vault in East US and another in West US within a single Terraform execution pipeline.
+
+**Question:**
+
+How do you structure your Terraform code to manage multiple Azure regions simultaneously within a single configuration file? What specific Terraform construct allows you to target different regions for different resources?
+
+	</summary><br><b>
+
+### Answer
+
+	This scenario tests whether you know how to work with multiple provider instances in a single Terraform codebase.
+Here is the step-by-step breakdown of how to structure your code for multi-region Azure deployments.
+
+The Core Solution: Provider Aliases (alias)
+
+By default, an azurerm provider block applies to a single region defined in its location attribute or via environment variables. To target a second region (or a different subscription/tenant) in the same Terraform run, you define a second provider block with an alias attribute.
+
+**Step 1: Define Multiple Provider Blocks**
+
+In your `providers.tf` or `main.tf`, declare a default provider and an aliased provider:
+
+``` Terraform
+
+# Default Provider (Primary Region: East US)
+provider "azurerm" {
+  features {}
+  subscription_id = var.subscription_id
+}
+# Aliased Provider (Secondary Region: West US)
+provider "azurerm" {
+  alias           = "west_us"
+  features {}
+  subscription_id = var.subscription_id
+}
+```
+
+**Step 2: Assign the Provider to Resources**
+
+When declaring your resources, any resource without a provider meta-argument defaults to the primary provider. For secondary region resources, pass the provider argument explicitly using the azurerm.alias syntax:
+
+``` Terraform
+
+# Primary Key Vault (Deploys to East US using default provider)
+resource "azurerm_key_vault" "kv_primary" {
+  name                = "kv-app-prod-eastus"
+  location            = "East US"
+  resource_group_name = azurerm_resource_group.rg_primary.name
+  tenant_id           = data.azurerm_client_config.current.tenant_id
+  sku_name            = "standard"
+}
+# Secondary Key Vault (Deploys to West US using the 'west_us' provider)
+resource "azurerm_key_vault" "kv_secondary" {
+  provider            = azurerm.west_us  # <--- CRITICAL META-ARGUMENT
+  name                = "kv-app-prod-westus"
+  location            = "West US"
+  resource_group_name = azurerm_resource_group.rg_secondary.name
+  tenant_id           = data.azurerm_client_config.current.tenant_id
+  sku_name            = "standard"
+}
+```
+
+Passing Aliased Providers to Modules
+If you wrap your Key Vault code inside a reusable module instead of raw resource blocks, you pass the provider configuration inside the providers map in the module block:
+
+``` Terraform
+
+# Deploying the primary Key Vault via module
+module "key_vault_east" {
+  source   = "./modules/key_vault"
+  location = "East US"
+  
+  providers = {
+    azurerm = azurerm  # Passes default provider
+  }
+}
+# Deploying the secondary Key Vault via module
+module "key_vault_west" {
+  source   = "./modules/key_vault"
+  location = "West US"
+  
+  providers = {
+    azurerm = azurerm.west_us  # Passes aliased provider
+  }
+}
+
+```
+
+Common Use Cases for Provider Aliases in Azure
+
+- Multi-Region High Availability (HA): Primary and secondary regions for disaster recovery setups (e.g., East US + West US).
+- Cross-Subscription Deployments: Deploying hub networking in a Connectivity Subscription and application workloads in a Workload Subscription.
+- Cross-Tenant Deployments: Managing Azure Lighthouse or partner configurations across multiple Azure Active Directory (Entra ID) tenants.
+	
+	</b>
 </details>
