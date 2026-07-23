@@ -510,3 +510,21 @@ Common Use Cases for Provider Aliases in Azure
 	
 	</b>
 </details>
+
+<details>
+<summary>
+
+### Scenario 8 (Azure): Handling Zero-Downtime Deployment for VM Scale Sets
+Ready for the next Azure scenario?
+
+You manage a web application running on an Azure Virtual Machine Scale Set (azurerm_orchestrated_virtual_machine_scale_set).
+
+You update your Terraform code to change an immutable setting (like the custom OS image ID or subnet configuration) that requires virtual machine instances to be recreated.
+
+**Question:**
+
+If you simply run terraform apply, what risk do you run regarding application availability? What Terraform lifecycle meta-argument or Azure deployment strategy should you use to ensure zero-downtime updates for your web app instances?
+
+</summary><br><b>
+
+</b></details>
