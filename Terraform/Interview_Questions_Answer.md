@@ -527,4 +527,77 @@ If you simply run terraform apply, what risk do you run regarding application av
 
 </summary><br><b>
 
+### Answer
+
+This scenario tests your understanding of how Terraform manages resource replacement lifecycle and how Azure Virtual Machine Scale Sets (VMSS) update their underlying instances.
+
+The Risk with Default terraform apply
+
+By default, when an immutable property on a virtual machine or scale set changes, Terraform uses a destroy-then-create lifecycle pattern:
+- Destroys the existing resource first.
+- Creates the new resource second.
+  
+For a VM Scale Set, this means Terraform deletes your existing scale set before creating the new one. During the window between destruction and creation, all active traffic drops, causing 100% downtime for your application.
+
+**Solution 1: Terraform lifecycle { create_before_destroy = true }**
+
+To override the default destroy-then-create behavior, you add a lifecycle block inside your scale set configuration:
+``` Terraform
+
+resource "azurerm_orchestrated_virtual_machine_scale_set" "web_vmss" {
+  name                = "vmss-web-prod"
+  resource_group_name = azurerm_resource_group.rg.name
+  location            = azurerm_resource_group.rg.location
+  sku_name            = "Standard_D2s_v5"
+  instances           = 3
+# Custom image reference that forces replacement
+  source_image_id = var.new_custom_image_id
+# CRITICAL ZERO-DOWNTIME LIFECYCLE BLOCK
+  lifecycle {
+    create_before_destroy = true
+  }
+}
+
+```
+
+How create_before_destroy = true works:
+
+- Terraform provisions the new VM Scale Set alongside the old one.
+- Once the new VMSS is up, healthy, and registered with your Azure Load Balancer or Application Gateway, Terraform safely deletes the old VMSS.
+- Result: Active users experience zero disruption.
+  
+	Important Azure Requirement: For create_before_destroy to work without naming conflicts, the name of the resource must either be dynamic (e.g., using name_prefix) or not collide during the temporary overlap period.
+
+**Solution 2: Azure Rolling Updates (In-Place Scale Set Updates)**
+
+If you are updating settings that only modify the VMSS model (such as updating an OS image version) rather than forcing a full resource replacement, you can combine Terraform with Azure's native Rolling Upgrade Policy:
+
+``` Terraform
+
+resource "azurerm_orchestrated_virtual_machine_scale_set" "web_vmss" {
+  # ... other configuration ...
+rolling_upgrade_policy {
+    max_batch_instance_percent              = 20  # Upgrade 20% of VMs at a time
+    max_unhealthy_instance_percent          = 20
+    max_unhealthy_upgraded_instance_percent = 20
+    pause_time_between_batches              = "PT30S" # Wait 30s between batches
+  }
+upgrade_mode = "Rolling" # Automatically roll out model updates across instances
+}
+
+```
+
+How Rolling Upgrades work:
+- Terraform updates the VMSS model definition in Azure.
+- Azure takes one batch of instances offline at a time (e.g., 20% of your fleet), updates them to the new image/setting, checks health probes, and moves on to the next batch.
+- The remaining 80% of your fleet continues serving production traffic uninterrupted.
+  
+Quick Summary for Interview Responses
+
+Approach	When to Use	How It Works
+
+lifecycle { create_before_destroy = true }	When Terraform forces full resource replacement of the VMSS.	Provisions a brand-new scale set, routes traffic to it, then tears down the old one.
+
+Rolling Upgrade Mode	When updating image versions/models in-place.	Azure updates instances in batches while keeping the rest of the fleet serving live requests.
+
 </b></details>
