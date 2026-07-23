@@ -421,7 +421,7 @@ You need to provision an Azure Key Vault in East US and another in West US withi
 
 How do you structure your Terraform code to manage multiple Azure regions simultaneously within a single configuration file? What specific Terraform construct allows you to target different regions for different resources?
 
-	</summary><br><b>
+</summary><br><b>
 
 ### Answer
 
