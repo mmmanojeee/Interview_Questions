@@ -326,13 +326,16 @@ nslookup myserver.database.windows.net
   <summary>
     
 ### Scenario 6 (Azure): Breaking Down Stacks with terraform_remote_state vs. Data Sources
-
 Ready for the next Azure scenario?
+
 Your company’s core platform team manages the foundation network using Terraform:
-	• Azure Virtual Network (VNet)
-	• Subnets, Network Security Groups (NSGs), and Route Tables
+- Azure Virtual Network (VNet)
+- Subnets, Network Security Groups (NSGs), and Route Tables
+  
 Your application team is writing a separate Terraform codebase to deploy an Azure Virtual Machine Scale Set (VMSS) that needs to join one of those existing subnets.
-Question:
+
+**Question:**
+
 To fetch the subnet_id created by the platform team into your application team's Terraform code, you can use either an `azurerm_subnet` data source or an `azurerm_remote_state` data source.
 What is the difference between these two approaches, and why do most Azure enterprise architectures prefer the standard Azure data source over terraform_remote_state?
 
@@ -387,7 +390,8 @@ resource "azurerm_network_interface" "nic" {
     subnet_id = data.azurerm_subnet.app_subnet.id
   }
 }
-...
+
+```
 
 Why Enterprise Azure Teams Avoid terraform_remote_state
 
