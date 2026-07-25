@@ -876,3 +876,56 @@ Summary of Enterprise Benefits
 
 </b>
 </details>
+
+<details>
+	<summary>
+
+### Scenario 11: The Subnet Route Table Override & Broken Hub-Spoke Traffic
+
+You are managing an enterprise Hub-and-Spoke Network Architecture in Azure using Terraform:
+
+**Hub VNet (vnet-hub):** Contains an Azure Firewall (azurerm_firewall) acting as the central security inspection point for all outbound internet traffic.
+
+**Spoke VNet (vnet-spoke-app):** Contains an Application Subnet (snet-app) housing your backend Virtual Machines.
+
+To route all internet-bound traffic (0.0.0.0/0) from the Application Subnet through the Azure Firewall in the Hub VNet, you create an Azure Route Table (azurerm_route_table), define a custom route pointing 0.0.0.0/0 to the Firewall's Private IP, and associate it with snet-app.
+
+`` Terraform
+
+# Route Table Definition
+resource "azurerm_route_table" "app_rt" {
+  name                = "rt-spoke-app"
+  location            = azurerm_resource_group.rg.location
+  resource_group_name = azurerm_resource_group.rg.name
+
+  route {
+    name                   = "route-to-firewall"
+    address_prefix         = "0.0.0.0/0"
+    next_hop_type          = "VirtualAppliance"
+    next_hop_in_ip_address = var.azure_firewall_private_ip
+  }
+}
+
+```
+
+Later, a developer updates the Subnet configuration in your Terraform code by adding a inline route_table_id attribute directly inside the azurerm_subnet resource block, while another module uses the dedicated azurerm_subnet_route_table_association resource.
+
+After running terraform apply:
+
+Traffic between the Spoke Subnet and the Hub Firewall breaks intermittently.
+
+Every subsequent terraform plan flags the subnet association as needing to be created or modified, causing drift on every single pipeline run.
+
+Questions:
+
+Why does defining route_table_id inside an azurerm_subnet block conflict with using the separate azurerm_subnet_route_table_association resource, causing infinite plan drift in Terraform?
+
+How should you properly structure your HCL code for Azure Subnets, Network Security Groups (NSGs), and Route Tables to prevent conflicts and ensure clean modularization?
+
+What troubleshooting step or Azure CLI command would you use to verify if a VM inside snet-app is actually using your custom Firewall route vs. default Azure system routes?
+
+</summary><br><b>
+
+
+</b>
+</details>
