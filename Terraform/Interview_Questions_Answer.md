@@ -926,6 +926,89 @@ What troubleshooting step or Azure CLI command would you use to verify if a VM i
 
 </summary><br><b>
 
+### Answer
+
+This scenario hits on a major trap in the azurerm provider related to resource boundary management.
+Here is the diagnosis, the recommended HCL code structure, and the troubleshooting methodology.
+1. Why Conflict & Infinite Plan Drift Occur
+   - The azurerm provider offers two ways to link Route Tables and Network Security Groups (NSGs) to Subnets:
+      - Inline attributes: Specifying route_table_id directly inside the azurerm_subnet resource block.
+      - Standalone association resources: Using the separate `azurerm_subnet_route_table_association` resource.
+### The Mechanism behind the Conflict
+
+When you mix both methods:
+  - `azurerm_subnet manages` the subnet and expects its inline route_table_id to be the source of truth.
+  - `azurerm_subnet_route_table_association` tells Terraform to manage the association out-of-band as a separate resource.
+  - During terraform apply, one resource overwrites or conflicts with the state tracking of the other. On the next terraform plan, Terraform reads live Azure infrastructure, sees a state discrepancy, and attempts to modify or recreate the association again—leading to permanent state drift and intermittent route disconnects.
+  - **Golden Rule of azurerm Subnets:** Never mix inline route_table_id / network_security_group_id parameters inside azurerm_subnet with standalone association resources.
+    
+2. Proper HCL Structure for Subnets, NSGs, and Route TablesThe enterprise best practice is to keep the azurerm_subnet block completely bare of inline route table and NSG parameters, using dedicated standalone association resources for both.
+   
+Clean HCL Example
+
+``` Terraform
+
+# 1. Subnet Resource (Clean, no inline NSG or Route Table references)
+resource "azurerm_subnet" "app_subnet" {
+  name                 = "snet-spoke-app"
+  resource_group_name  = azurerm_resource_group.rg.name
+  virtual_network_name = azurerm_virtual_network.vnet_spoke.name
+  address_prefixes     = ["10.1.1.0/24"]
+}
+
+# 2. Route Table Resource
+resource "azurerm_route_table" "app_rt" {
+  name                = "rt-spoke-app"
+  location            = azurerm_resource_group.rg.location
+  resource_group_name = azurerm_resource_group.rg.name
+
+  route {
+    name                   = "route-to-firewall"
+    address_prefix         = "0.0.0.0/0"
+    next_hop_type          = "VirtualAppliance"
+    next_hop_in_ip_address = var.azure_firewall_private_ip
+  }
+}
+
+# 3. Standalone Route Table Association (Preferred Method)
+resource "azurerm_subnet_route_table_association" "app_rt_assoc" {
+  subnet_id      = azurerm_subnet.app_subnet.id
+  route_table_id = azurerm_route_table.app_rt.id
+}
+
+# 4. Standalone NSG Association (Preferred Method)
+resource "azurerm_subnet_network_security_group_association" "app_nsg_assoc" {
+  subnet_id                 = azurerm_subnet.app_subnet.id
+  network_security_group_id = azurerm_network_security_group.app_nsg.id
+}
+
+```
+
+By decoupling these into standalone association resources, you can write modular code where a core team owns the Subnet and an app team attaches custom Route Tables or NSGs independently without modifying the core Subnet block.
+
+3. How to Troubleshoot Effective Routes in AzureWhen traffic isn't hitting your Hub Firewall, you need to verify Azure's Effective Route Table for the Virtual Machine's Network Interface (NIC).
+    - Option A: Azure CLI CommandRun az network nic show-effective-route-table to inspect active routes evaluated by Azure:
+``` Bash
+az network nic show-effective-route-table \
+  --resource-group rg-spoke-app \
+  --name nic-app-vm-01 \
+  --output table
+```
+
+What to look for in the CLI output:
+  - Look at the line for 0.0.0.0/0.
+  - Correct State: NextHopType displays VirtualAppliance and NextHopIP matches your Azure Firewall IP (10.0.0.4). Source should read User.
+  - Broken State: NextHopType displays Internet or System, indicating the user-defined route table association failed to bind.
+
+**Option B:** Azure Network WatcherUse Azure Network Watcher $\rightarrow$ Next Hop in the Azure Portal or via CLI:
+``` Bash
+az network watcher show-next-hop \
+  --resource-group rg-spoke-app \
+  --vm vm-app-01 \
+  --source-ip 10.1.1.4 \
+  --dest-ip 8.8.8.8
+```
+If configured correctly, the result explicitly returns Next Hop IP: 10.0.0.4 (VirtualAppliance).
 
 </b>
 </details>
