@@ -890,7 +890,7 @@ You are managing an enterprise Hub-and-Spoke Network Architecture in Azure using
 
 To route all internet-bound traffic (0.0.0.0/0) from the Application Subnet through the Azure Firewall in the Hub VNet, you create an Azure Route Table (azurerm_route_table), define a custom route pointing 0.0.0.0/0 to the Firewall's Private IP, and associate it with snet-app.
 
-`` Terraform
+``` Terraform
 
 # Route Table Definition
 resource "azurerm_route_table" "app_rt" {
@@ -910,13 +910,13 @@ resource "azurerm_route_table" "app_rt" {
 
 Later, a developer updates the Subnet configuration in your Terraform code by adding a inline route_table_id attribute directly inside the azurerm_subnet resource block, while another module uses the dedicated azurerm_subnet_route_table_association resource.
 
-After running terraform apply:
+**After running terraform apply:**
 
 Traffic between the Spoke Subnet and the Hub Firewall breaks intermittently.
 
 Every subsequent terraform plan flags the subnet association as needing to be created or modified, causing drift on every single pipeline run.
 
-Questions:
+**Questions:**
 
 Why does defining route_table_id inside an azurerm_subnet block conflict with using the separate azurerm_subnet_route_table_association resource, causing infinite plan drift in Terraform?
 
