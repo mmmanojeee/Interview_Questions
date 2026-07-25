@@ -636,6 +636,8 @@ How do you handle built-in or custom Azure Policy enforcement natively in Terraf
 
 </summary><br><b>
 
+### Answer
+
 1. Why CanNotDelete locks block updates in Terraform
 
 In Azure, updating certain resources or nested sub-resources (like security rules, route table rules, or temporary resource replacements) under the hood involves a recreation (delete and recreate) step by the Azure Provider or ARM API.
