@@ -634,8 +634,7 @@ How do you properly manage Azure Resource Locks (azurerm_management_lock) in Ter
 
 How do you handle built-in or custom Azure Policy enforcement natively in Terraform to prevent pipeline failures before Azure API rejects your plan?	
 
-	</summary><br>
-<b>
+	</summary><br><b>
 
 1. Why CanNotDelete locks block updates in Terraform
 
