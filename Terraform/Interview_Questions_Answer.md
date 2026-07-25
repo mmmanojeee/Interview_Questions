@@ -601,3 +601,117 @@ lifecycle { create_before_destroy = true }	When Terraform forces full resource r
 Rolling Upgrade Mode	When updating image versions/models in-place.	Azure updates instances in batches while keeping the rest of the fleet serving live requests.
 
 </b></details>
+
+<details>
+	<summary>
+		
+### Scenario 9: The Unexpected Plan Failure & Locked Resource Conflict
+
+You are an Infrastructure Engineer managing core foundation services in Azure using Terraform.
+
+To protect critical production resources from accidental deletion, an enterprise security policy applies an Azure Management Lock (CanNotDelete) on your core Resource Group (rg-core-networking-prod).
+
+Inside this resource group, you have an Azure Network Security Group (NSG) defined in Terraform:
+
+``` Terraform
+resource "azurerm_network_security_group" "nsg" {
+  name                = "nsg-prod-app"
+  location            = azurerm_resource_group.rg.location
+  resource_group_name = azurerm_resource_group.rg.name
+}
+
+```
+
+A security audit requires you to modify an existing NSG rule or add a tag. When your automated CI/CD pipeline runs terraform apply, the deployment fails with a 403 AuthorizationFailed / ScopeLocked error, stating that the resource cannot perform the operation because of a CanNotDelete lock on the parent resource group—even though you were only trying to update an existing resource, not delete it!
+
+At the same time, an Azure Policy assigned at the subscription level strictly denies the creation of any storage account or resource that does not have a required CostCenter tag.
+
+**Questions:**
+
+Why does an Azure CanNotDelete lock on a Resource Group sometimes cause Terraform apply updates to fail with a lock error even when you aren't trying to delete the parent resource group or the resource itself?
+
+How do you properly manage Azure Resource Locks (azurerm_management_lock) in Terraform code so that automated CI/CD pipelines can apply updates cleanly without requiring engineers to manually toggle locks off and on in the Azure Portal?
+
+How do you handle built-in or custom Azure Policy enforcement natively in Terraform to prevent pipeline failures before Azure API rejects your plan?	
+
+	</summary><br>
+<b>
+
+1. Why CanNotDelete locks block updates in Terraform
+
+In Azure, updating certain resources or nested sub-resources (like security rules, route table rules, or temporary resource replacements) under the hood involves a recreation (delete and recreate) step by the Azure Provider or ARM API.
+
+Because the parent Resource Group carries a CanNotDelete lock, Azure denies the deletion half of the operation—even if your intention was just an update.
+
+2. Managing Azure Locks in Terraform (azurerm_management_lock)
+To avoid manual portal toggles, manage the lock directly in your Terraform codebase using explicit dependencies:
+
+``` Terraform
+
+# Manage the Resource Group
+resource "azurerm_resource_group" "rg" {
+  name     = "rg-core-networking-prod"
+  location = "East US"
+}
+
+# Manage your Network Security Group
+resource "azurerm_network_security_group" "nsg" {
+  name                = "nsg-prod-app"
+  location            = azurerm_resource_group.rg.location
+  resource_group_name = azurerm_resource_group.rg.name
+}
+
+# Apply the Lock with explicit dependencies
+resource "azurerm_management_lock" "rg_lock" {
+  name       = "rg-delete-lock"
+  scope      = azurerm_resource_group.rg.id
+  lock_level = "CanNotDelete"
+  notes      = "Prevents accidental deletion of production networking"
+
+  # CRITICAL DEPENDENCY: Ensures resources inside are created/updated FIRST
+  depends_on = [
+    azurerm_network_security_group.nsg
+  ]
+}
+
+```
+
+**Pipeline Trick:** If you need to perform an update that forces recreation, run a targeting command or pass a variable flag to temporarily disable the lock via code (count = var.enable_lock ? 1 : 0), apply the change, and re-enable it—all completely automated.
+
+3. Handling Azure Policy Compliance in Terraform
+When an Azure Policy requires tags (e.g., CostCenter), handle enforcement natively at the code level using local values or variable validation rules so Terraform fails fast during terraform validate or terraform plan before hitting the Azure API.
+
+``` Terraform
+
+# Variable validation rule
+variable "tags" {
+  type = map(string)
+  validation {
+    condition     = contains(keys(var.tags), "CostCenter")
+    error_message = "All resources must include a 'CostCenter' tag to satisfy Azure Policy."
+  }
+}
+
+# Or use default merged locals across all modules
+locals {
+  mandatory_tags = {
+    CostCenter  = "CC-1092"
+    Environment = "Production"
+    ManagedBy   = "Terraform"
+  }
+}
+
+resource "azurerm_storage_account" "st" {
+  name                     = "stappdataprod2026"
+  resource_group_name      = azurerm_resource_group.rg.name
+  location                 = azurerm_resource_group.rg.location
+  account_tier             = "Standard"
+  account_replication_type = "LRS"
+
+  tags = local.mandatory_tags
+}
+
+```
+
+</b>
+</details>
