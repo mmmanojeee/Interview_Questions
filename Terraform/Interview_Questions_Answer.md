@@ -716,3 +716,163 @@ resource "azurerm_storage_account" "st" {
 
 </b>
 </details>
+
+<details>
+	<summary>
+		
+### Scenario 10: The Azure DevOps Pipeline & Hardcoded Secrets Risk
+
+You are setting up an automated Azure DevOps pipeline (or GitHub Actions) to execute terraform plan and terraform apply across multiple Azure Subscriptions (Dev, Staging, and Production).
+
+Historically, teams created a Service Principal in Microsoft Entra ID (formerly Azure AD) with a Client ID and Client Secret, pasting the secret as a hidden variable in the pipeline settings.
+
+However, your Chief Information Security Officer (CISO) issues a strict mandate:
+
+**Zero Hardcoded Credentials:** No static client secrets or passwords can be stored in pipeline variables or service connections. Secrets expire, get leaked, or introduce maintenance overhead.
+
+**State Isolation:** Dev, Staging, and Production must have isolated remote state files in Azure Storage, but pipelines must run automatically without human intervention.
+
+**Questions:**
+
+What Azure authentication method allows an Azure DevOps / GitHub Actions pipeline to authenticate to Azure for Terraform runs without storing any client secrets or passwords?
+
+How do you configure the backend "azurerm" block in Terraform so that a single pipeline codebase can dynamically target different state files/storage containers across Dev, Staging, and Production without hardcoding backend details in .tf files?
+
+</summary><br><b>
+
+### Answer
+
+	This scenario touches on modern cloud security practices for Azure CI/CD pipelines. Storing static secrets in pipeline variables is a major security risk, and avoiding hardcoded backend configurations is essential for multi-environment deployments.
+
+Here is how you meet both security mandates cleanly using native Azure and Terraform capabilities.
+
+**1. Zero Hardcoded Secrets:** Federated Workload Identity (OIDC)
+To authenticate to Azure without storing client secrets or certificates, you use OpenID Connect (OIDC) Federated Identity Credentials (also known as Workload Identity Federation in Microsoft Entra ID).
+
+**How Workload Identity Federation Works:**
+
+**Instead of sending a password/secret to Azure:**
+
+When your Azure DevOps pipeline (or GitHub Actions workflow) starts, the pipeline issuer issues a short-lived, cryptographically signed JSON Web Token (JWT).
+
+The pipeline presents this token to Microsoft Entra ID (Azure AD).
+
+Entra ID verifies the token against a pre-configured Federated Credential trust relationship (which validates the exact Organization, Project, and Branch/Environment).
+
+Entra ID exchanges the token for a short-lived Azure access token.
+
+Terraform uses this temporary access token to execute the run.
+
+```
+
+┌─────────────────┐       1. Request JWT Token       ┌─────────────────────┐
+│                 ├─────────────────────────────────►│                     │
+│  Azure DevOps / │                                  │ Pipeline OIDC Token │
+│  GitHub Actions │       2. Exchange OIDC JWT       │       Issuer        │
+│                 ├──────────────────────────────────┴──────────┬──────────┘
+│                 │                                             │
+│                 │       3. Issue Short-Lived Access Token     │
+│                 │◄────────────────────────────────────────────┤
+└────────┬────────┘                                             │
+         │                                                      ▼
+         │ 4. Execute Terraform                              ┌─────┐
+         └──────────────────────────────────────────────────►│ Azure API │
+                                                             └─────┘
+
+```
+
+HCL Provider Configuration
+
+In your Terraform configuration, tell the azurerm provider to use OIDC authentication:
+
+``` Terraform
+
+provider "azurerm" {
+  features {}
+  
+  use_oidc        = true  # Enables OpenID Connect authentication
+  client_id       = var.azure_client_id       # Managed identity / App registration client ID
+  tenant_id       = var.azure_tenant_id       # Entra ID tenant ID
+  subscription_id = var.azure_subscription_id # Target subscription ID
+}
+
+```
+
+**2. Dynamic State Files Across Environments:** Partial Backend Configuration
+   
+Hardcoding backend storage account names, container names, or state keys inside your backend "azurerm" block forces you to duplicate code or write hacks.
+
+The industry standard pattern is Partial Configuration.
+
+**Step 1:** Keep the backend block minimal in .tf code
+In your providers.tf file, declare an empty or minimal backend configuration:
+
+```Terraform
+
+terraform {
+  required_version = ">= 1.5.0"
+  
+  backend "azurerm" {
+    # Leave backend details empty here!
+    # They will be supplied dynamically at runtime via the CI/CD pipeline.
+    use_oidc = true
+  }
+}
+
+```
+
+**Step 2:** Pass backend configurations dynamically during terraform init
+
+In your Azure DevOps YAML pipeline (or GitHub Actions workflow), pass the environment-specific storage details as arguments to terraform init using a .backend.tfvars file or command-line flags:
+
+**Option A:** Using Command-Line Flags
+
+``` Bash
+
+# Pipeline execution for Dev
+terraform init \
+  -backend-config="resource_group_name=rg-tfstate-dev" \
+  -backend-config="storage_account_name=sttfstatedev2026" \
+  -backend-config="container_name=tfstate" \
+  -backend-config="key=dev.terraform.tfstate"
+
+# Pipeline execution for Production
+terraform init \
+  -backend-config="resource_group_name=rg-tfstate-prod" \
+  -backend-config="storage_account_name=sttfstateprod2026" \
+  -backend-config="container_name=tfstate" \
+  -backend-config="key=prod.terraform.tfstate"
+
+```
+
+**Option B:** Using Backend Config Files (dev.backend.tfvars)
+
+Create separate backend configuration files per environment in your repository:
+
+`env/dev.backend.tfvars:`
+
+``` Terraform
+
+resource_group_name  = "rg-tfstate-dev"
+storage_account_name = "sttfstatedev2026"
+container_name       = "tfstate"
+key                  = "dev.terraform.tfstate"
+
+```
+
+Then initialize Terraform in the pipeline with:
+
+``` Bash
+terraform init -backend-config=env/${ENVIRONMENT}.backend.tfvars
+```
+Summary of Enterprise Benefits
+==============================
+
+**No Secret Rotations:** Because there are no static client secrets, security teams never have to worry about expiring passwords or secret rotation schedules.
+
+**Granular RBAC:** You can assign your Dev pipeline Service Principal Contributor rights only on the Dev subscription, and your Prod pipeline Service Principal Contributor rights on the Prod subscription.
+
+**Isolated Blast Radius:** Dev state corruption cannot impact Production state because they live in completely separate Storage Accounts and Subscriptions.
+
+</b>
+</details>
