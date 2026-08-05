@@ -1012,3 +1012,145 @@ If configured correctly, the result explicitly returns Next Hop IP: 10.0.0.4 (Vi
 
 </b>
 </details>
+
+Here is a categorized list of **Basic, Intermediate, and Advanced Terraform interview questions and answers**, specifically tailored for Microsoft Azure environments.
+
+---
+
+### Basic Level Questions
+
+#### 1. What is Infrastructure as Code (IaC), and what is Terraform?
+
+* **Answer:** - **Infrastructure as Code (IaC):** The practice of managing and provisioning IT infrastructure through definition files rather than manual portal configurations or interactive CLI tools.
+* **Terraform:** An open-source IaC tool created by HashiCorp. It uses a declarative language called HashiCorp Configuration Language (HCL) to define, provision, and manage cloud resources predictably and repeatably across environments.
+
+
+
+#### 2. What are the core workflow steps in Terraform?
+
+* **Answer:**
+* `terraform init`: Initializes the working directory, downloads required provider plugins (e.g., `azurerm`), and sets up backend storage.
+* `terraform plan`: Reads the current state and configuration to generate an execution plan showing what actions will be taken without modifying real resources.
+* `terraform apply`: Executes the changes outlined in the plan to create, update, or delete Azure infrastructure.
+* `terraform destroy`: Removes all managed infrastructure declared in the Terraform state.
+
+
+
+#### 3. How does Terraform interact with Microsoft Azure?
+
+* **Answer:** Terraform uses the **Azure Provider (`azurerm`)** to interact with Azure Resource Manager (ARM) APIs. You configure the provider block with authentication details—such as Service Principals, Managed Identities, or Azure CLI credentials—allowing Terraform to manage resources like Azure VMs, Storage Accounts, and Virtual Networks.
+
+#### 4. What is a Terraform State file (`terraform.tfstate`), and why is it essential?
+
+* **Answer:** The state file is a JSON file that maps configured resources in code to real-world Azure resource IDs. It tracks metadata, dependencies, and resource attributes so Terraform knows what changes need to be applied during execution plans.
+
+---
+
+### Intermediate Level Questions
+
+#### 5. How do you configure a Remote Backend in Azure for Terraform state storage and state locking?
+
+* **Answer:** A remote backend stores `terraform.tfstate` centrally in an **Azure Blob Storage Account**. State locking is natively handled by Azure Blob Leases to prevent simultaneous executions from corrupting the state file.
+* **Example Configuration:**
+```hcl
+terraform {
+  backend "azurerm" {
+    resource_group_name  = "rg-terraform-state"
+    storage_account_name = "sttfstateacct"
+    container_name       = "tfstate"
+    key                  = "prod.terraform.tfstate"
+  }
+}
+
+```
+
+
+
+#### 6. What is the difference between Input Variables, Local Values, and Output Values in Terraform?
+
+* **Answer:**
+* **Input Variables (`variable`):** Parameters passed into Terraform modules to allow customization without modifying code (e.g., specifying `location = "East US"`).
+* **Local Values (`locals`):** Internal expressions or constants used within a module to reduce duplication (e.g., constructed naming conventions or standard tags).
+* **Output Values (`output`):** Values exposed to the CLI or passed to other root/child modules (e.g., returning a VM's private IP or Key Vault URI).
+
+
+
+#### 7. How do Terraform Modules work, and how should they be structured for Azure?
+
+* **Answer:** Modules are containers for multiple resources configured to be reused across environments. A standard module structure contains:
+* `main.tf`: Contains core Azure resource declarations (e.g., `azurerm_virtual_network`).
+* `variables.tf`: Defines configurable module inputs.
+* `outputs.tf`: Defines exposed module outputs.
+* Root modules consume reusable child modules located locally or in repositories (GitHub, Azure DevOps, Terraform Registry).
+
+
+
+#### 8. How do you handle sensitive data (e.g., passwords, keys) when provisioning Azure resources?
+
+* **Answer:**
+* Mark input variables as `sensitive = true` to suppress their values in CLI outputs and logs.
+* Pass secrets dynamically via environment variables (`TF_VAR_secret_name`) or retrieve them at runtime using the `azurerm_key_vault_secret` data source.
+* Secure the state file in Azure Blob Storage with strict Azure RBAC permissions and customer-managed encryption keys, as raw secrets remain stored in state files.
+
+
+
+---
+
+### Advanced Level Questions
+
+#### 9. How would you structure multi-environment infrastructure (Dev, Test, Prod) in Azure using Terraform?
+
+* **Answer:**
+* **Directory Separation (Recommended):** Maintain independent directories for each environment (e.g., `environments/dev/`, `environments/prod/`), each with dedicated state files, variable files (`.tfvars`), and isolated Azure subscription scopes.
+* **Terraform Workspaces:** Allows switching states within the same codebase (`terraform workspace select dev`). While convenient, directory separation is generally preferred in enterprise setups to ensure strict security boundaries and access controls between subscriptions.
+
+
+
+#### 10. What are Data Sources in Terraform, and how are they used in Azure?
+
+* **Answer:** Data sources allow Terraform to fetch properties of existing Azure resources that were created outside of the current Terraform configuration.
+* **Example:**
+```hcl
+data "azurerm_virtual_network" "shared_vnet" {
+  name                = "vnet-shared-prod"
+  resource_group_name = "rg-networking-prod"
+}
+
+resource "azurerm_subnet" "app_subnet" {
+  name                 = "snet-app"
+  resource_group_name  = data.azurerm_virtual_network.shared_vnet.resource_group_name
+  virtual_network_name = data.azurerm_virtual_network.shared_vnet.name
+  address_prefixes     = ["10.0.1.0/24"]
+}
+
+```
+
+
+
+#### 11. How do you handle state drift, resource imports, and code refactoring with the `moved` block?
+
+* **Answer:**
+* **State Drift:** Running `terraform plan` compares actual Azure state to state file records. Use `terraform apply -refresh-only` to update state to reality, or re-apply code to restore desired configurations.
+* **Resource Import:** Use the `import` HCL block or `terraform import` command to bring pre-existing Azure infrastructure under Terraform control without recreating resources.
+* **Refactoring (`moved` block):** Refactor resource names or module paths safely without causing resource recreation using HCL `moved` blocks:
+
+```hcl
+moved {
+  from = azurerm_linux_virtual_machine.old_vm
+  to   = azurerm_linux_virtual_machine.new_vm
+}
+
+```
+
+
+
+
+
+#### 12. How do you securely integrate Terraform into an Azure DevOps or GitHub Actions CI/CD pipeline?
+
+* **Answer:**
+* **Authentication:** Use **Workload Identity Federation (OIDC)** to authenticate pipelines with Azure Service Principals, eliminating long-lived client secrets.
+* **Automated Workflow:**
+1. **PR Checks:** Run `terraform fmt -check`, `terraform validate`, and `terraform plan`. Save the plan output file (`tfplan`) and publish it to the pull request for review.
+2. **Approval Gate:** Enforce manual approval requirements prior to production deployment.
+3. **Apply Phase:** Execute `terraform apply tfplan` to guarantee that only the reviewed changes are applied idempotently.

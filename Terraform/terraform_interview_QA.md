@@ -119,3 +119,5 @@ A curated set of advanced Terraform + Azure interview questions, organized by do
 - **Interviewers:** Pick 1–2 questions per domain based on the seniority level being assessed (Domains 1–2 for mid-level, Domains 3–6 for senior/lead roles).
 - **Candidates:** Use the **Focus** notes as a checklist — a strong answer should touch on most of the listed concepts, not just define the primary term.
 - **Scenario questions** are best answered with a structured approach: *diagnose → immediate mitigation → long-term fix → prevention*.
+
+
