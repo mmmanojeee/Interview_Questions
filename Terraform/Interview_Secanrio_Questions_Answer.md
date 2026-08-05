@@ -1154,3 +1154,124 @@ moved {
 1. **PR Checks:** Run `terraform fmt -check`, `terraform validate`, and `terraform plan`. Save the plan output file (`tfplan`) and publish it to the pull request for review.
 2. **Approval Gate:** Enforce manual approval requirements prior to production deployment.
 3. **Apply Phase:** Execute `terraform apply tfplan` to guarantee that only the reviewed changes are applied idempotently.
+
+---
+
+Here is an additional set of **Basic, Intermediate, and Advanced Terraform interview questions and answers**, specifically structured around Microsoft Azure scenarios.
+
+---
+
+### Basic Level Questions
+
+#### 1. How do you pass variable values into Terraform when provisioning Azure infrastructure?
+
+* **Answer:** You can supply input variables in multiple ways (listed in order of precedence):
+* **Command Line:** Using the `-var` or `-var-file` flags during execution (`terraform apply -var="location=EastUS"`).
+* **Variable Definition Files:** Automatically loaded files named `terraform.tfvars` or `*.auto.tfvars`.
+* **Environment Variables:** Setting environment variables prefixed with `TF_VAR_` (e.g., `export TF_VAR_location="EastUS"`).
+* **Variable Defaults:** Fallback values declared directly inside the `variables.tf` file.
+
+
+
+#### 2. What is the purpose of `terraform fmt` and `terraform validate`?
+
+* **Answer:**
+* `terraform fmt`: Rewrites Terraform configuration files to follow standard HCL formatting guidelines (indentation, alignment, and formatting consistency across teams).
+* `terraform validate`: Verifies whether the syntax and internal structure of the configuration files are valid. It checks resource declarations, missing arguments, and variable types locally without reading actual state or reaching out to Azure APIs.
+
+
+
+#### 3. What is the difference between `count` and `for_each` in Terraform, and when should you use `for_each` for Azure resources?
+
+* **Answer:**
+* `count`: Uses an integer value to create multiple instances indexed by number (`[0]`, `[1]`). If you remove an item from the middle of the list, Terraform will re-index all subsequent items, which can cause unintended resource destruction and recreation in Azure.
+* `for_each`: Accepts a map or set of strings and assigns each resource a unique string key.
+* **Best Practice:** Use `for_each` when creating multiple similar Azure resources (such as Subnets, NSG rules, or Storage Accounts) to ensure each resource retains a stable identifier regardless of additions or removals.
+
+
+
+---
+
+### Intermediate Level Questions
+
+#### 4. How do lifecycle arguments (`prevent_destroy`, `ignore_changes`, `create_before_destroy`) work in Terraform?
+
+* **Answer:**
+* `prevent_destroy`: Rejects execution plans that would result in the deletion of a protected resource (e.g., safeguarding critical Azure Key Vaults or SQL Databases from accidental destruction).
+* `ignore_changes`: Tells Terraform to ignore specific resource attribute updates caused by external processes (e.g., ignoring manual updates to Azure App Service auto-scaling settings or tags).
+* `create_before_destroy`: Instructs Terraform to provision a new replacement resource before destroying the existing one, avoiding downtime during updates (e.g., zero-downtime updates for Network Interfaces or Virtual Machines).
+
+
+
+#### 5. What is the difference between implicit and explicit dependencies in Terraform?
+
+* **Answer:**
+* **Implicit Dependency:** Terraform automatically infers the order of creation by analyzing resource references in code (e.g., passing `azurerm_resource_group.rg.name` into an `azurerm_virtual_network` resource tells Terraform to create the Resource Group first).
+* **Explicit Dependency:** Defined using the `depends_on` meta-argument when Terraform cannot infer resource dependencies automatically (e.g., ensuring an Azure Key Vault Access Policy is created before attempting to store a secret in that Key Vault).
+
+
+
+#### 6. How does the `dynamic` block syntax work, and how is it used with Azure resources?
+
+* **Answer:**
+* A `dynamic` block allows you to construct repeated nested blocks inside a resource using complex types (lists, maps, or sets).
+* **Example Usage:** Generating repetitive Network Security Group (NSG) rules dynamically without writing duplicate code blocks:
+```hcl
+resource "azurerm_network_security_group" "nsg" {
+  name                = "nsg-app-prod"
+  location            = azurerm_resource_group.rg.location
+  resource_group_name = azurerm_resource_group.rg.name
+
+  dynamic "security_rule" {
+    for_each = var.nsg_rules
+    content {
+      name                       = security_rule.value.name
+      priority                   = security_rule.value.priority
+      direction                  = "Inbound"
+      access                     = "Allow"
+      protocol                   = "Tcp"
+      source_port_range          = "*"
+      destination_port_range     = security_rule.value.port
+      source_address_prefix      = security_rule.value.source
+      destination_address_prefix = "*"
+    }
+  }
+}
+
+```
+
+
+
+
+
+---
+
+### Advanced Level Questions
+
+#### 7. What are `precondition`, `postcondition`, and custom variable validations, and how do they enforce standards in Azure?
+
+* **Answer:**
+* **Variable Validation (`validation`):** Evaluates input variables before configuration parsing starts (e.g., enforcing Azure naming rules like ensuring storage account names contain only lowercase alphanumeric characters).
+* **Precondition:** Evaluates assumptions **before** executing a resource block (e.g., validating that an Azure Subnet contains an adequate IP range before placing a VM in it).
+* **Postcondition:** Evaluates resource attributes **after** creation/update (e.g., verifying that a newly provisioned Azure Storage Account enforces TLS 1.2 minimum version compliance).
+
+
+
+#### 8. How do you perform state manipulation and refactoring in enterprise Azure environments using `terraform state` commands?
+
+* **Answer:**
+* `terraform state list`: Displays all managed resource addresses present in the state file.
+* `terraform state rm`: Unmanages a resource by removing it from the state file without triggering actual resource deletion in Azure.
+* `terraform state mv`: Moves resources between modules or renames resources in state without causing destroy-and-recreate cycles.
+* **State Splitting:** Large monolithic state files slow down `terraform plan` execution and increase blast radius. Advanced setups split state files into distinct domains (e.g., Core Networking, Identity, Application Compute) linked via `terraform_remote_state` or Data Sources.
+
+
+
+#### 9. What is the difference between Policy-as-Code tools (e.g., Sentinel, OPA) and Azure Policy when managing Terraform deployments?
+
+* **Answer:**
+* **Sentinel / Open Policy Agent (OPA):** Evaluates compliance **shift-left / pre-deployment** within CI/CD pipelines during the `terraform plan` stage. It inspects HCL configurations and plan outputs to block non-compliant deployments before reaching Azure APIs.
+* **Azure Policy:** Evaluates compliance **at runtime** at the Azure Resource Manager (ARM) API level. It acts as a guardrail in Azure itself, auditing or denying non-compliant deployments regardless of whether they originated from Terraform, Azure CLI, or the Azure Portal. Combined, Sentinel/OPA acts as the build-time gatekeeper while Azure Policy acts as the cloud governance guardrail.
+
+---
+
