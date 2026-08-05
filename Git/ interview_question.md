@@ -12,7 +12,7 @@ A collection of common Git interview questions, organized by difficulty level.
 
 ## Basic Git Questions
 
-**1. What is Git?**
+**1. What is Git?**<b>
 A distributed version control system for tracking changes in source code.
 
 **2. What are the differences between Git and GitHub?**
