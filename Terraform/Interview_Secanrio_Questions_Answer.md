@@ -1275,3 +1275,63 @@ resource "azurerm_network_security_group" "nsg" {
 
 ---
 
+Here is a **third set** of technical Terraform interview questions and detailed answers specifically geared toward Azure environments.
+### Basic Level Questions
+#### 1. How does Terraform handle resource naming conventions in Azure?
+ * **Answer:** Azure resources often require strict and unique naming rules (e.g., Storage Accounts must be globally unique and lowercase alphanumeric).
+   * To enforce standards, you can use **Local Values** (locals) to dynamically format prefixes, project names, and environment tags.
+   * Alternatively, you can use the official hashicorp/azurecaf (Azure Cloud Adoption Framework) provider to automatically generate compliant resource names.
+#### 2. What is the difference between terraform destroy and target-based destruction (terraform apply -destroy -target="...")?
+ * **Answer:**
+   * terraform destroy: Removes **all** infrastructure managed by the configuration file.
+   * Target Destruction: Destroying a single resource using -target="azurerm_linux_virtual_machine.vm" selectively removes only that specified resource.
+   * **Caution:** Targeting resources manually is discouraged in production environments because it can cause dependency gaps and break state integrity.
+#### 3. What are Provider Version Constraints and why are they vital for the Azure Provider (azurerm)?
+ * **Answer:** Provider version constraints lock the azurerm plugin to a specific version or major version range inside the terraform settings block.
+ * **Why it matters:** The azurerm provider receives frequent updates. Locking versions prevents breaking API changes or unintended resource drift across team members running terraform init.
+ * **Example:**
+   ```hcl
+   terraform {
+     required_providers {
+       azurerm = {
+         source  = "hashicorp/azurerm"
+         version = "~> 3.0" # Allows non-breaking minor updates
+       }
+     }
+   }
+   
+   ```
+### Intermediate Level Questions
+#### 4. How do Terraform Workspaces work, and what are their limitations in Azure enterprise environments?
+ * **Answer:** - **Workspaces** allow you to maintain multiple state files for the exact same configuration code within a single backend directory (terraform workspace new dev).
+   * **Limitations:** Workspaces use the same backend storage account and key structure, making it hard to apply granular Azure Role-Based Access Control (RBAC) per environment.
+   * **Enterprise Best Practice:** Enterprise teams usually prefer **directory-based separation** (separate folders and subscriptions per environment) rather than workspaces for better security isolation and RBAC control.
+#### 5. How do you handle circular dependencies in Terraform when deploying Azure resources?
+ * **Answer:**
+   * **Cause:** Circular dependencies happen when Resource A requires outputs from Resource B, but Resource B requires outputs from Resource A during creation.
+   * **Solution:** Break the explicit connection by introducing an intermediate resource or decoupling the property configuration. For example, when linking a App Service to an Azure Virtual Network subnet via Subnet Delegation, assign network rules via separate child resources (like azurerm_app_service_virtual_network_swift_connection) instead of nesting the configuration directly in the VNet definition.
+#### 6. What is the difference between null_resource, terraform_data, and Provisioners (local-exec, remote-exec)?
+ * **Answer:**
+   * **Provisioners (local-exec / remote-exec):** Execute scripts locally or inside Azure Virtual Machines upon creation. They should only be used as a last resort because they bypass Terraform state tracking.
+   * **null_resource:** An empty resource used to trigger arbitrary provisioner scripts or custom lifecycle actions without creating a physical Azure resource.
+   * **terraform_data:** Introduced in Terraform 1.4 as a built-in replacement for null_resource. It natively tracks arbitrary data in state and supports dependency triggers without requiring an external provider plugin.
+### Advanced Level Questions
+#### 7. How do you handle private infrastructure deployments where Azure Storage Accounts and Azure Key Vaults disable public access?
+ * **Answer:**
+   * **Problem:** If a Storage Account holding state or a Key Vault storing secrets blocks public internet traffic via Firewalls/Private Endpoints, standard CI/CD runners (like public GitHub or Azure DevOps agents) will be blocked.
+   * **Solution:** 1. Deploy **Self-Hosted / Private Build Agents** (or Azure DevOps Managed Virtual Network Agents) directly inside an Azure VNet.
+     2. Grant the agents private access to the backend storage account and Key Vault via **Private Endpoints** or VNet Service Endpoints.
+     3. Authenticate using Azure Workload Identity / Managed Identity over internal networking paths.
+#### 8. How do you safely handle breaking updates in Azure resources (e.g., forced recreation of Azure VMs or Subnets)?
+ * **Answer:**
+   * Certain resource attribute changes in Azure (like changing an Azure Subnet's address prefix or altering an OS disk type on a Virtual Machine) require Azure Resource Manager to recreate the resource completely.
+   * **Safety Steps:**
+     1. **Plan Analysis:** Run terraform plan in CI/CD pipelines to inspect blue destroy/recreate flags (-/+) before execution.
+     2. **Zero-Downtime:** Use lifecycle { create_before_destroy = true } so Terraform provisions the replacement resource before tearing down the old one.
+     3. **Target Restrictions:** Use prevent_destroy = true on sensitive items like SQL Databases or Key Vaults to hard-block unintended deletions.
+#### 9. What is Terraform Plugin Framework vs SDKv2, and how does it impact Azure resource options (azurerm)?
+ * **Answer:**
+   * **SDKv2:** The legacy framework used to write Terraform provider plugins. It has limitations handling complex types, null vs empty values, and detailed error messages.
+   * **Plugin Framework:** HashiCorp’s modern framework that powers newer Azure provider updates. It provides support for native HCL features, dynamic block typing, custom validation rules, and structural error reports.
+   * **Impact:** Allows the azurerm provider to closely mirror newly released Azure ARM API features and provide precise plan-time validations before reaching Azure APIs.
+
