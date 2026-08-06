@@ -1916,3 +1916,254 @@ resource "azurerm_site_recovery_replicated_vm" "vm_replication" {
 }
 
 ```
+
+---
+
+Here is a **fifteenth set** of 10 scenario-focused Terraform and Microsoft Azure interview questions with practical HCL code examples.
+## Basic Level Questions
+### 1. What is terraform graph, and how can you use it to visualize Azure resource dependencies?
+ * **Answer:** * terraform graph: Generates a visual representation of the dependency tree defined in your Terraform configuration or state file in Graphviz DOT format.
+   * **Use Case:** Helps teams analyze complex resource creation chains (e.g., verifying that Network Security Groups and Subnets are constructed before Virtual Machines) or identify unintended circular dependencies.
+ * **Example Command:**
+```bash
+# Generate a dependency graph and convert it to an image file using Graphviz
+terraform graph | dot -Tpng > azure_infrastructure_graph.png
+
+```
+### 2. How do override.tf and *_override.tf files behave in a Terraform configuration?
+ * **Answer:**
+   * Files named override.tf or ending in _override.tf are loaded **last** by Terraform.
+   * Rather than replacing standard .tf files, they selectively merge into and override arguments defined in existing resource or module declarations.
+   * **Best Practice:** Used primarily for emergency hotfixes, local developer testing, or temporarily changing specific Azure settings without modifying the main codebase.
+ * **Example:** Overriding an Azure App Service SKU tier locally:
+```hcl
+# override.tf
+resource "azurerm_service_plan" "app_plan" {
+  # Overrides sku_name to a cheaper tier for local sandbox testing
+  sku_name = "B1"
+}
+
+```
+### 3. How do you construct string templates and multi-line strings in HCL using Heredoc syntax?
+ * **Answer:** * Use the Heredoc syntax (<<EOT ... EOT) or stripped Heredoc (<<-EOT ... EOT) to declare multi-line string blocks (e.g., cloud-init user-data scripts or JSON parameters) cleanly.
+   * Stripped syntax (<<-EOT) automatically removes leading whitespace indentation, preserving clean code formatting.
+ * **Example:** Passing a custom cloud-init script into an Azure Linux Virtual Machine:
+```hcl
+locals {
+  custom_data_script = <<-EOT
+    #!/bin/bash
+    apt-get update -y
+    apt-get install -y nginx
+    systemctl enable --now nginx
+  EOT
+}
+
+resource "azurerm_linux_virtual_machine" "vm" {
+  name                = "vm-web-prod"
+  resource_group_name = "rg-web"
+  location            = "East US"
+  size                = "Standard_B2s"
+  admin_username      = "azureuser"
+
+  # Encodes multi-line script for Azure custom data
+  custom_data = base64encode(locals.custom_data_script)
+
+  # ... Network interface & disk configs ...
+}
+
+```
+## Intermediate Level Questions
+### 4. How do you configure Azure Web App Regional VNet Integration using Terraform?
+ * **Answer:** Provision the Linux or Windows Web App along with a designated Azure Subnet containing the Microsoft.Web/serverFarms delegation. Connect the app to the subnet using azurerm_app_service_virtual_network_swift_connection.
+ * **Example:**
+```hcl
+# Delegated Subnet for App Service VNet Integration
+resource "azurerm_subnet" "vnet_integration_subnet" {
+  name                 = "snet-app-vnet-integration"
+  resource_group_name  = "rg-networking"
+  virtual_network_name = "vnet-spoke"
+  address_prefixes     = ["10.1.2.0/24"]
+
+  delegation {
+    name = "appservice-delegation"
+    service_delegation {
+      name    = "Microsoft.Web/serverFarms"
+      actions = ["Microsoft.Network/virtualNetworks/subnets/action"]
+    }
+  }
+}
+
+# Link Web App to Delegated Subnet
+resource "azurerm_app_service_virtual_network_swift_connection" "vnet_integration" {
+  app_service_id = azurerm_linux_web_app.app.id
+  subnet_id      = azurerm_subnet.vnet_integration_subnet.id
+}
+
+```
+### 5. How do you manage Azure Storage Accounts with multiple Private Endpoints targeting different sub-resources (blob, file, queue, table)?
+ * **Answer:** Each Azure Storage sub-resource requires its own distinct azurerm_private_endpoint resource and specific Private DNS Zone target (e.g., privatelink.blob.core.windows.net, privatelink.file.core.windows.net).
+ * **Example:** Creating Private Endpoints for both Blob and File services on a single Storage Account using for_each:
+```hcl
+variable "storage_subresources" {
+  type = map(string)
+  default = {
+    "blob" = "privatelink.blob.core.windows.net"
+    "file" = "privatelink.file.core.windows.net"
+  }
+}
+
+resource "azurerm_private_endpoint" "st_endpoints" {
+  for_each            = var.storage_subresources
+  name                = "pe-st-${each.key}-prod"
+  location            = "East US"
+  resource_group_name = "rg-data"
+  subnet_id           = "/subscriptions/.../subnets/snet-private-endpoints"
+
+  private_service_connection {
+    name                           = "psc-st-${each.key}"
+    private_connection_resource_id = azurerm_storage_account.st.id
+    is_manual_connection           = false
+    subresource_names              = [each.key] # Target 'blob' or 'file'
+  }
+}
+
+```
+### 6. How do you provision a standalone Azure Web Application Firewall (WAF) Policy and attach it to an Application Gateway in Terraform?
+ * **Answer:** Define an independent azurerm_web_application_firewall_policy with custom rules (e.g., IP rate limiting or Geo-blocking). Next, link the policy to the azurerm_application_gateway by assigning its ID to the firewall_policy_id property.
+ * **Example:**
+```hcl
+# Standalone Azure WAF Policy
+resource "azurerm_web_application_firewall_policy" "waf_policy" {
+  name                = "waf-policy-global"
+  resource_group_name = "rg-security"
+  location            = "East US"
+
+  policy_settings {
+    enabled = true
+    mode    = "Prevention"
+  }
+
+  managed_rules {
+    managed_rule_set {
+      type    = "OWASP"
+      version = "3.2"
+    }
+  }
+}
+
+# Attach WAF Policy to Application Gateway
+resource "azurerm_application_gateway" "appgw" {
+  name                = "agw-web-prod"
+  resource_group_name = "rg-networking"
+  location            = "East US"
+  firewall_policy_id  = azurerm_web_application_firewall_policy.waf_policy.id
+
+  # ... Gateway configuration ...
+}
+
+```
+### 7. How do you configure soft-delete and purge protection on Azure Key Vault using Terraform?
+ * **Answer:** Set soft_delete_retention_days (between 7 and 90 days) and set purge_protection_enabled = true. Additionally, specify the provider behavior in the features { key_vault { ... } } block to manage behavior when running terraform destroy.
+ * **Example:**
+```hcl
+provider "azurerm" {
+  features {
+    key_vault {
+      # Retains soft-deleted Key Vaults upon destroy instead of forcing immediate purge
+      purge_soft_delete_on_destroy = false
+    }
+  }
+}
+
+resource "azurerm_key_vault" "kv" {
+  name                       = "kv-sec-prod-001"
+  location                   = "East US"
+  resource_group_name        = "rg-sec"
+  tenant_id                  = "00000000-0000-0000-0000-000000000000"
+  sku_name                   = "standard"
+  soft_delete_retention_days = 90
+  purge_protection_enabled   = true # Prevents permanent purge during retention window
+}
+
+```
+## Advanced Level Questions
+### 8. How do you mock Azure provider dependencies in terraform test without creating real cloud infrastructure?
+ * **Answer:** Modern terraform test supports mock providers using override_provider blocks inside .tftest.hcl files. This validates resource configurations, conditions, and dynamic variable transformations without executing live calls against Azure APIs.
+ * **Example:**
+```hcl
+# tests/unit_test.tftest.hcl
+override_provider {
+  azurerm = {} # Mocks azurerm API responses locally
+}
+
+run "validate_vnet_creation_logic" {
+  command = plan
+
+  assert {
+    condition     = azurerm_virtual_network.vnet.address_space[0] == "10.0.0.0/16"
+    error_message = "VNet address space configuration must equal 10.0.0.0/16."
+  }
+}
+
+```
+### 9. How do you provision Azure Monitor Managed Service for Prometheus and Managed Grafana using Terraform?
+ * **Answer:** Deploy azurerm_monitor_workspace (Prometheus backend) along with azurerm_dashboard_grafana. Establish a data source connection between Grafana and the Azure Monitor Workspace using Azure RBAC role assignments (Monitoring Reader).
+ * **Example:**
+```hcl
+# 1. Azure Monitor Workspace (Prometheus)
+resource "azurerm_monitor_workspace" "prometheus" {
+  name                = "prom-workspace-prod"
+  resource_group_name = "rg-ops"
+  location            = "East US"
+}
+
+# 2. Azure Managed Grafana
+resource "azurerm_dashboard_grafana" "grafana" {
+  name                = "grafana-dashboard-prod"
+  resource_group_name = "rg-ops"
+  location            = "East US"
+  sku                 = "Standard"
+
+  identity {
+    type = "SystemAssigned"
+  }
+}
+
+# 3. Assign Monitoring Reader permissions to Grafana Identity
+resource "azurerm_role_assignment" "grafana_prom_reader" {
+  scope                = azurerm_monitor_workspace.prometheus.id
+  role_definition_name = "Monitoring Reader"
+  principal_id         = azurerm_dashboard_grafana.grafana.identity[0].principal_id
+}
+
+```
+### 10. How do you implement Run Triggers and Remote Workspaces in Terraform Cloud/Enterprise when orchestrating multi-layer Azure deployments?
+ * **Answer:** * Split infrastructure into isolated workspaces (e.g., 1-networking, 2-database, 3-app-compute).
+   * Use **Run Triggers** in Terraform Cloud to automatically chain execution workflows (e.g., applying updates to 1-networking automatically triggers a plan in 2-database).
+   * Pass upstream resource attributes across workspaces using the terraform_remote_state data source pointed at the remote org/workspace.
+ * **Example:**
+```hcl
+# App Compute Workspace reading outputs from Remote Networking Workspace
+data "terraform_remote_state" "networking_remote" {
+  backend = "remote"
+
+  config = {
+    organization = "enterprise-corp"
+    workspaces = {
+      name = "1-networking-prod"
+    }
+  }
+}
+
+resource "azurerm_linux_web_app" "app" {
+  name                = "app-orders-prod"
+  resource_group_name = "rg-app"
+  location            = "East US"
+  service_plan_id     = "/subscriptions/.../servicePlans/asp-prod"
+
+  # Accesses VNet subnet output from the remote networking workspace
+  virtual_network_subnet_id = data.terraform_remote_state.networking_remote.outputs.app_subnet_id
+}
+
+```
+Would you like to explore any specific Azure domain in more detail, such as **AKS / Containers**, **Enterprise Governance & Policies**, or **Hub-and-Spoke Networking**?
