@@ -627,3 +627,247 @@ resource "azurerm_storage_account" "st" {
 
 ```
 
+---
+
+Here is a **tenth, expanded set** of unique Terraform and Azure interview questions and code examples. This set contains **12 detailed, scenario-based questions** spanning Basic, Intermediate, and Advanced topics.
+## Basic Level Questions
+### 1. How do you declare and manage multiple Azure Storage Containers inside a single Storage Account using for_each?
+ * **Answer:** Rather than writing repetitive azurerm_storage_container blocks, pass a set(string) or map into for_each. This creates containers with predictable state addresses and allows easy management via simple variable lists.
+ * **Example:**
+```hcl
+variable "container_names" {
+  type    = set(string)
+  default = ["data", "logs", "backups"]
+}
+
+resource "azurerm_storage_container" "containers" {
+  for_each              = var.container_names
+  name                  = each.key
+  storage_account_name  = "stappdata001"
+  container_access_type = "private"
+}
+
+```
+### 2. How do you configure resource removal behavior using the terraform destroy prevent lifecycle rule?
+ * **Answer:** You place prevent_destroy = true inside the lifecycle block of a critical resource. If anyone attempts a terraform destroy or an apply that forces recreation, Terraform rejects the plan before making any Azure API requests.
+ * **Example:**
+```hcl
+resource "azurerm_mssql_database" "db" {
+  name             = "sqldb-production"
+  server_id        = "/subscriptions/.../servers/sql-prod"
+  collation        = "SQL_Latin1_General_CP1_CI_AS"
+  max_size_gb      = 100
+  sku_name         = "S1"
+
+  lifecycle {
+    prevent_destroy = true
+  }
+}
+
+```
+### 3. What is the difference between var inputs and local definitions when configuring Azure Resource tags?
+ * **Answer:**
+   * **var (Input Variables):** Values supplied from outside the module (e.g., via CLI, .tfvars, or pipeline variables) to allow customization.
+   * **local (Local Values):** Calculated expressions, merged maps, or internal constants defined inside the module to avoid code duplication.
+ * **Example:** Merging external variables with calculated local values for tagging:
+```hcl
+variable "environment" {
+  type    = string
+  default = "prod"
+}
+
+locals {
+  common_tags = {
+    Environment = var.environment
+    ManagedBy   = "Terraform"
+    CreatedDate = "2026-08-06"
+  }
+}
+
+resource "azurerm_resource_group" "rg" {
+  name     = "rg-app-${var.environment}"
+  location = "East US"
+  tags     = locals.common_tags
+}
+
+```
+### 4. How do you suppress sensitive values in outputs so they aren't printed to stdout during terraform apply?
+ * **Answer:** Mark the output definition with sensitive = true. Terraform continues saving the true value in the state file, but masks it in terminal outputs and pipeline logs.
+ * **Example:**
+```hcl
+resource "azurerm_storage_account" "st" {
+  name                     = "stappdata001"
+  resource_group_name      = "rg-app"
+  location                 = "East US"
+  account_tier             = "Standard"
+  account_replication_type = "LRS"
+}
+
+output "storage_primary_access_key" {
+  value       = azurerm_storage_account.st.primary_access_key
+  sensitive   = true # Prevents displaying key in CLI/Pipeline execution logs
+}
+
+```
+## Intermediate Level Questions
+### 5. How do you configure Azure Virtual Network Peering bi-directionally between two VNets in Terraform?
+ * **Answer:** Azure VNet Peering is non-transitive and unidirectional. To connect two VNets fully, you must construct **two** azurerm_virtual_network_peering resources—one from VNet A to VNet B, and another from VNet B to VNet A.
+ * **Example:**
+```hcl
+# Peering 1: Hub to Spoke
+resource "azurerm_virtual_network_peering" "hub_to_spoke" {
+  name                      = "peer-hub-to-spoke"
+  resource_group_name       = "rg-hub"
+  virtual_network_name      = "vnet-hub"
+  remote_virtual_network_id = "/subscriptions/.../virtualNetworks/vnet-spoke"
+  allow_virtual_network_access = true
+  allow_forwarded_traffic      = true
+}
+
+# Peering 2: Spoke to Hub
+resource "azurerm_virtual_network_peering" "spoke_to_hub" {
+  name                      = "peer-spoke-to-hub"
+  resource_group_name       = "rg-spoke"
+  virtual_network_name      = "vnet-spoke"
+  remote_virtual_network_id = "/subscriptions/.../virtualNetworks/vnet-hub"
+  allow_virtual_network_access = true
+}
+
+```
+### 6. How do you attach a custom Route Table to an existing Azure Subnet using Terraform?
+ * **Answer:** Provision the Route Table (azurerm_route_table), define individual routes (azurerm_route), and link it to the target subnet using azurerm_subnet_route_table_association.
+ * **Example:**
+```hcl
+resource "azurerm_route_table" "rt" {
+  name                = "rt-spoke-to-firewall"
+  location            = "East US"
+  resource_group_name = "rg-networking"
+
+  route {
+    name                   = "dg-to-azure-firewall"
+    address_prefix         = "0.0.0.0/0"
+    next_hop_type          = "VirtualAppliance"
+    next_hop_in_ip_address = "10.0.0.4" # Azure Firewall Private IP
+  }
+}
+
+resource "azurerm_subnet_route_table_association" "assoc" {
+  subnet_id      = "/subscriptions/.../subnets/snet-app"
+  route_table_id = azurerm_route_table.rt.id
+}
+
+```
+### 7. How do you provision Azure Key Vault Access Policies dynamically for multiple Principal IDs?
+ * **Answer:** Rather than declaring hardcoded policy blocks, use azurerm_key_vault_access_policy separately with for_each bound to a map of identities and permissions.
+ * **Example:**
+```hcl
+variable "keyvault_access_map" {
+  type = map(list(string))
+  default = {
+    "00000000-0000-0000-0000-000000000001" = ["Get", "List"]
+    "00000000-0000-0000-0000-000000000002" = ["Get", "List", "Set", "Delete"]
+  }
+}
+
+resource "azurerm_key_vault_access_policy" "policies" {
+  for_each     = var.keyvault_access_map
+  key_vault_id = "/subscriptions/.../vaults/kv-prod"
+  tenant_id    = "11111111-1111-1111-1111-111111111111"
+  object_id    = each.key
+
+  secret_permissions = each.value
+}
+
+```
+### 8. How do you configure custom Input Variable validations using regex patterns for Azure Naming compliance?
+ * **Answer:** Add a validation block inside the variable declaration. Terraform tests the variable's value against standard functions or regular expressions before attempting to generate execution plans.
+ * **Example:** Restricting Azure Storage Account names to lowercase letters and numbers (3 to 24 characters):
+```hcl
+variable "storage_account_name" {
+  type        = string
+  description = "Globally unique name for Azure Storage Account."
+
+  validation {
+    condition     = can(regex("^[a-z0-9]{3,24}$", var.storage_account_name))
+    error_message = "Storage Account names must be between 3 and 24 characters, lowercase, and contain numbers or letters only."
+  }
+}
+
+```
+## Advanced Level Questions
+### 9. How do you configure cross-region state replication or multi-region data storage using Terraform?
+ * **Answer:** Pair an primary resource with secondary data endpoints using azurerm provider aliases or built-in geo-replication arguments (such as geo_match_definition or geo_replication).
+ * **Example:** Deploying a Geo-Redundant (RA-GRS) Azure Storage Account with custom replication parameters:
+```hcl
+resource "azurerm_storage_account" "primary_storage" {
+  name                     = "stappdataprod001"
+  resource_group_name      = "rg-data-prod"
+  location                 = "East US"
+  account_tier             = "Standard"
+  account_replication_type = "RAGRS" # Read-Access Geo-Redundant Storage
+
+  blob_properties {
+    versioning_enabled = true # Supports point-in-time recovery
+  }
+}
+
+```
+### 10. How do you implement custom validation on a Data Source using precondition blocks?
+ * **Answer:** Use a precondition block inside a lifecycle block. If an existing Azure resource fetched via a data block doesn't meet requirements (e.g., missing expected tags or insufficient IP ranges), execution stops immediately.
+ * **Example:** Validating that an existing Azure VNet has the correct tags before placing new workloads into it:
+```hcl
+data "azurerm_virtual_network" "existing_vnet" {
+  name                = "vnet-shared-prod"
+  resource_group_name = "rg-networking"
+
+  lifecycle {
+    precondition {
+      condition     = lookup(self.tags, "ComplianceStatus", "") == "Approved"
+      error_message = "Target Virtual Network is not marked as 'Approved' in Azure Tags."
+    }
+  }
+}
+
+```
+### 11. How do you write declarative import blocks in HCL (Terraform 1.5+) to onboard unmanaged Azure resources safely?
+ * **Answer:** Instead of running imperatively typed terraform import commands, declare import HCL blocks in code specifying the resource address and target Azure Resource Manager (ARM) ID.
+ * **Example:**
+```hcl
+# 1. Target Resource HCL Definition
+resource "azurerm_resource_group" "legacy_rg" {
+  name     = "rg-legacy-app"
+  location = "East US"
+}
+
+# 2. Declarative Import Block
+import {
+  to = azurerm_resource_group.legacy_rg
+  id = "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-legacy-app"
+}
+
+```
+### 12. How do you deploy an Azure Private Endpoint with Automated Private DNS Zone Registration in a modular pipeline?
+ * **Answer:** Connect azurerm_private_endpoint directly to the target Azure PaaS resource ID (e.g., Key Vault or SQL Server), and include the private_dns_zone_group block to handle record registration automatically.
+ * **Example:**
+```hcl
+resource "azurerm_private_endpoint" "kv_pe" {
+  name                = "pe-kv-prod"
+  location            = "East US"
+  resource_group_name = "rg-security"
+  subnet_id           = "/subscriptions/.../subnets/snet-private-endpoints"
+
+  private_service_connection {
+    name                           = "psc-kv-prod"
+    private_connection_resource_id = "/subscriptions/.../vaults/kv-prod"
+    is_manual_connection           = false
+    subresource_names              = ["vault"]
+  }
+
+  private_dns_zone_group {
+    name                 = "dns-group-kv"
+    private_dns_zone_ids = ["/subscriptions/.../privateDnsZones/privatelink.vaultcore.azure.net"]
+  }
+}
+
+```
+
