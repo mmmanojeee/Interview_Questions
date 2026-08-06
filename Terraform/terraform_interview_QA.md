@@ -2685,3 +2685,226 @@ run "verify_https_enforcement" {
 }
 
 ```
+
+---
+
+Here is an **eighteenth set** of brand-new, scenario-based Terraform and Microsoft Azure interview questions and answers, designed in the student-friendly format with **The Concept**, **The Interview Answer**, and an **HCL Code Example**.
+## Basic Level Questions
+### 1. What is the difference between an azurerm Resource declaration and an azurerm Data Source lookup?
+ * **The Concept:** Think of a **Resource** as buying a brand-new house—you define its features, and Terraform constructs it for you in Azure. A **Data Source** is like looking up an address in a phone book—the house already exists, and you just want to find its address or details so you can send mail there.
+ * **The Interview Answer:** * resource "azurerm_...": Tells Terraform to create, manage, and track a *new* Azure infrastructure component in the state file.
+   * data "azurerm_...": Tells Terraform to perform a *read-only* query against Azure Resource Manager (ARM) APIs to fetch attributes of a pre-existing resource without managing its lifecycle.
+ * **HCL Example:**
+```hcl
+# Data Source: Looking up an existing Resource Group
+data "azurerm_resource_group" "existing_rg" {
+  name = "rg-shared-infrastructure-prod"
+}
+
+# Resource: Creating a NEW Storage Account inside that existing Resource Group
+resource "azurerm_storage_account" "new_storage" {
+  name                     = "stappdata002"
+  resource_group_name      = data.azurerm_resource_group.existing_rg.name # References data lookup
+  location                 = data.azurerm_resource_group.existing_rg.location
+  account_tier             = "Standard"
+  account_replication_type = "LRS"
+}
+
+```
+### 2. What is the templatefile() function, and how is it used to pass variables into Azure scripts?
+ * **The Concept:** Imagine writing a form letter with blank spots like "Hello [Name]". The templatefile() function reads a script file on your computer, replaces all the [Name] placeholders with real Terraform variables, and hands the completed script to your Azure Virtual Machine.
+ * **The Interview Answer:** templatefile(path, vars) reads an external file containing template syntax (${var_name}) and renders its content by substituting specified local or input variables. It is the standard way to dynamically inject parameters into Azure Linux Custom Data scripts or Windows PowerShell cloud-init scripts.
+ * **HCL Example:**
+```hcl
+# File: scripts/userdata.sh.tftpl
+# #!/bin/bash
+# echo "Environment: ${env_name}" > /tmp/env.txt
+# echo "Database Endpoint: ${db_host}" >> /tmp/env.txt
+
+resource "azurerm_linux_virtual_machine" "vm" {
+  name                = "vm-web-prod"
+  resource_group_name = "rg-app"
+  location            = "East US"
+  size                = "Standard_B2s"
+
+  # Renders the template script with live Terraform variables
+  custom_data = base64encode(
+    templatefile("${path.module}/scripts/userdata.sh.tftpl", {
+      env_name = "production"
+      db_host  = "sql-db.database.windows.net"
+    })
+  )
+
+  # ... Network interface and OS disk configuration ...
+}
+
+```
+### 3. What is the purpose of the azurerm_subnet_service_endpoint_storage_policy in Azure networking?
+ * **The Concept:** A Service Endpoint lets your private subnet talk directly to Azure Storage. But what if an attacker inside your network tries to copy data to their own personal storage account? A Storage Service Endpoint Policy acts like a guard rail, allowing traffic *only* to authorized enterprise storage accounts.
+ * **The Interview Answer:** An Azure Storage Service Endpoint Policy restricts outbound Service Endpoint traffic from a subnet to specific Azure Storage accounts. This prevents data exfiltration by blocking access to unauthorized storage accounts over internal networking paths.
+ * **HCL Example:**
+```hcl
+# Service Endpoint Policy allowing access ONLY to enterprise storage
+resource "azurerm_subnet_service_endpoint_storage_policy" "policy" {
+  name                = "policy-allow-prod-storage-only"
+  resource_group_name = "rg-networking"
+  location            = "East US"
+
+  definition {
+    name        = "allow-enterprise-storage"
+    description = "Allows access only to the production storage account"
+    service_resources = [
+      "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-data/providers/Microsoft.Storage/storageAccounts/stproddata001"
+    ]
+  }
+}
+
+```
+## Intermediate Level Questions
+### 4. How do you configure Azure Key Vault to use Azure RBAC for authorization instead of Access Policies?
+ * **The Concept:** Traditional Key Vaults use "Access Policies" where you explicitly list permissions for each user or app inside the Key Vault itself. "Azure RBAC Mode" replaces this by letting you manage Key Vault access at the Resource Group or Subscription level using standard Azure roles like "Key Vault Secrets User".
+ * **The Interview Answer:** Enable enable_rbac_authorization = true on azurerm_key_vault. This disables local Key Vault Access Policies and allows authorization to be managed via azurerm_role_assignment using built-in roles like "Key Vault Secrets Officer" or "Key Vault Secrets User".
+ * **HCL Example:**
+```hcl
+resource "azurerm_key_vault" "kv" {
+  name                      = "kv-security-prod-001"
+  location                  = "East US"
+  resource_group_name       = "rg-sec"
+  tenant_id                 = "00000000-0000-0000-0000-000000000000"
+  sku_name                  = "standard"
+  enable_rbac_authorization = true # Switches authorization to Azure RBAC
+}
+
+# Assign secrets reading access via RBAC
+resource "azurerm_role_assignment" "kv_user" {
+  scope                = azurerm_key_vault.kv.id
+  role_definition_name = "Key Vault Secrets User"
+  principal_id         = "11111111-1111-1111-1111-111111111111" # Managed Identity Object ID
+}
+
+```
+### 5. How do you configure Static Website Hosting on an Azure Storage Account using Terraform?
+ * **The Concept:** You don't always need a heavy web server to host a single-page app (like React or Angular). An Azure Storage Account can serve static HTML, CSS, and JS files directly to the web at a fraction of the cost.
+ * **The Interview Answer:** Use the static_website block inside azurerm_storage_account. Specify the index_document (e.g., index.html) and error_404_document (e.g., 404.html). Terraform automatically enables the $web storage container.
+ * **HCL Example:**
+```hcl
+resource "azurerm_storage_account" "website" {
+  name                     = "ststaticwebprod001"
+  resource_group_name      = "rg-web"
+  location                 = "East US"
+  account_tier             = "Standard"
+  account_replication_type = "LRS"
+
+  # Enables static web hosting capabilities
+  static_website {
+    index_document     = "index.html"
+    error_404_document = "404.html"
+  }
+}
+
+output "web_endpoint" {
+  value = azurerm_storage_account.website.primary_web_endpoint # Public web URL
+}
+
+```
+### 6. How do you create an Azure Private Link Service to securely expose an internal service to consumer VNets?
+ * **The Concept:** Imagine your company builds an API that other partner companies need to access. Instead of exposing your API to the public internet, you create a "Private Link Service" behind your load balancer so partners can connect to it securely through their own private VNet.
+ * **The Interview Answer:** Provision an azurerm_private_link_service attached to the Frontend IP Configuration of a Standard Internal Azure Load Balancer (azurerm_lb). Consumer subscriptions can then attach Private Endpoints targeting this service.
+ * **HCL Example:**
+```hcl
+resource "azurerm_private_link_service" "pls" {
+  name                = "pls-provider-service"
+  location            = "East US"
+  resource_group_name = "rg-provider"
+
+  # Link to Internal Standard Load Balancer Frontend IP
+  load_balancer_frontend_ip_configuration_ids = [
+    "/subscriptions/.../loadBalancers/lb-internal/frontendIPConfigurations/ip-config-internal"
+  ]
+
+  nat_ip_configuration {
+    name      = "pls-nat-config"
+    primary   = true
+    subnet_id = "/subscriptions/.../subnets/snet-pls-nat"
+  }
+}
+
+```
+### 7. How do you configure Azure Log Analytics Workspace Data Retention policies dynamically using Terraform?
+ * **The Concept:** Compliance requirements might say "keep production logs for 365 days, but development logs for only 30 days." You can set log retention rules inside your code based on variables.
+ * **The Interview Answer:** Set retention_in_days inside azurerm_log_analytics_workspace. You can also configure table-level overrides using azurerm_log_analytics_workspace_table to keep specific high-value audit tables longer than standard operational logs.
+ * **HCL Example:**
+```hcl
+variable "env" {
+  type    = string
+  default = "prod"
+}
+
+resource "azurerm_log_analytics_workspace" "law" {
+  name                = "law-central-${var.env}"
+  location            = "East US"
+  resource_group_name = "rg-ops"
+  sku                 = "PerGB2018"
+  
+  # Dynamic retention based on environment
+  retention_in_days   = var.env == "prod" ? 365 : 30
+}
+
+```
+## Advanced Level Questions
+### 8. How do you write integration tests in .tftest.hcl that actually provision and destroy real Azure resources (command = apply)?
+ * **The Concept:** Unit tests only inspect code locally (command = plan). Integration tests run command = apply to physically create real resources in a sandbox Azure subscription, run test assertions to verify they work, and then destroy everything automatically.
+ * **The Interview Answer:** In .tftest.hcl, write a run block with command = apply. Specify assertions comparing actual runtime output attributes from Azure. Terraform provisions the resources, runs the assertions, and teardowns the test stack cleanly upon completion.
+ * **HCL Example:**
+```hcl
+# tests/integration_test.tftest.hcl
+
+run "deploy_and_verify_storage_account" {
+  command = apply # Actually creates resources in Azure test subscription!
+
+  assert {
+    condition     = azurerm_storage_account.st.primary_location == "eastus"
+    error_message = "Storage Account was not deployed to the primary expected region."
+  }
+
+  assert {
+    condition     = startswith(azurerm_storage_account.st.primary_blob_endpoint, "https://")
+    error_message = "Storage Account primary endpoint is not serving over secure HTTPS."
+  }
+}
+
+```
+### 9. How do you handle Azure Provider authentication using Azure Managed Identity when running Terraform inside an Azure VM build agent?
+ * **The Concept:** Instead of storing Service Principal credentials or client secrets on a build agent machine (where they could be stolen), you give the build agent VM a System-Assigned Managed Identity and tell Terraform "just use the identity of the VM you are running on".
+ * **The Interview Answer:** Set use_msi = true in the provider "azurerm" block and supply subscription_id and tenant_id. Omit client_id and client_secret. Terraform automatically queries the Azure Instance Metadata Service (IMDS) endpoint (http://169.254.169.254) to fetch tokens securely.
+ * **HCL Example:**
+```hcl
+provider "azurerm" {
+  features {}
+
+  use_msi         = true # Uses Managed Identity of the host build agent VM
+  subscription_id = "00000000-0000-0000-0000-000000000000"
+  tenant_id       = "11111111-1111-1111-1111-111111111111"
+}
+
+```
+### 10. How do you create an Azure Subscription-level Policy Remediation Task using Terraform?
+ * **The Concept:** You assigned a policy saying "all Storage Accounts must disable public access." But what about 50 old storage accounts created years ago? A Policy Remediation Task actively scans the subscription and fixes non-compliant existing resources automatically.
+ * **The Interview Answer:** Provision an azurerm_subscription_policy_remediation targeting a specific subscription_policy_assignment_id. Azure Resource Manager evaluates non-compliant resources and applies remediation definitions without manual intervention.
+ * **HCL Example:**
+```hcl
+# 1. Subscription Policy Assignment
+resource "azurerm_subscription_policy_assignment" "assign_https" {
+  name                 = "assign-enforce-https"
+  subscription_id      = "/subscriptions/00000000-0000-0000-0000-000000000000"
+  policy_definition_id = "/providers/Microsoft.Authorization/policyDefinitions/40474edd-0b44-4b9a-a4d1-6b0bea3f1b03"
+}
+
+# 2. Automated Remediation Task for existing infrastructure
+resource "azurerm_subscription_policy_remediation" "remediate_existing" {
+  name                 = "remediate-old-storage-accounts"
+  subscription_id      = "/subscriptions/00000000-0000-0000-0000-000000000000"
+  policy_assignment_id = azurerm_subscription_policy_assignment.assign_https.id
+}
+
+```
