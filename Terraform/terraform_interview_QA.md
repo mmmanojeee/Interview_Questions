@@ -1418,4 +1418,265 @@ resource "azurerm_monitor_diagnostic_setting" "diag" {
 
 ```
 
+---
 
+
+Here is a **thirteenth set** of 10 scenario-based Terraform and Azure interview questions with practical HCL code examples.
+## Basic Level Questions
+### 1. What is the difference between path.module, path.root, and path.cwd in Terraform HCL?
+ * **Answer:**
+   * **path.module:** Returns the filesystem path to the module directory where the expression is evaluated. Essential inside reusable child modules to reference local template files or scripts relative to that module.
+   * **path.root:** Returns the filesystem path to the root module directory where execution started.
+   * **path.cwd:** Returns the current working directory from which the terraform command was run.
+ * **Example:** Loading a local initialization script located inside a child module:
+```hcl
+# Inside modules/app_service/main.tf
+resource "azurerm_linux_web_app" "app" {
+  name                = "app-orders-prod"
+  resource_group_name = "rg-orders"
+  location            = "East US"
+  service_plan_id     = var.service_plan_id
+
+  site_config {
+    # Path relative to child module location, regardless of where terraform apply is executed
+    app_command_line = file("${path.module}/scripts/startup.sh")
+  }
+}
+
+```
+### 2. How do you configure an Azure Storage Account Blob Lifecycle Management policy using Terraform?
+ * **Answer:** Use azurerm_storage_management_policy to define automated rules that transition unaccessed blobs to cooler storage tiers (Cool/Archive) or delete them after a defined number of days.
+ * **Example:** Moving blobs to Cool storage after 30 days and deleting them after 365 days:
+```hcl
+resource "azurerm_storage_management_policy" "retention" {
+  storage_account_id = azurerm_storage_account.st.id
+
+  rule {
+    name    = "archive-and-delete-old-blobs"
+    enabled = true
+
+    filter {
+      prefix_match = ["container-logs/"]
+      blob_types   = ["blockBlob"]
+    }
+
+    actions {
+      base_blob {
+        tier_to_cool_after_days_since_modification_greater_than    = 30
+        tier_to_archive_after_days_since_modification_greater_than = 90
+        delete_after_days_since_modification_greater_than          = 365
+      }
+    }
+  }
+}
+
+```
+### 3. How do you extract and export Terraform outputs in JSON format (terraform output -json) for automated pipeline ingestion?
+ * **Answer:** Running terraform output -json outputs all state outputs as a single, unformatted JSON object. This allows downstream script engines (like PowerShell, Python, or Azure CLI steps) to parse infrastructural data programmatically without needing direct state access.
+ * **Example:**
+```bash
+# Export state outputs to a JSON file
+terraform output -json > outputs.json
+
+# Parse specific value using jq in CI/CD pipeline
+STORAGE_KEY=$(jq -r '.storage_primary_access_key.value' outputs.json)
+
+```
+## Intermediate Level Questions
+### 4. How do you manage Azure SQL Database Elastic Pools dynamically using Terraform?
+ * **Answer:** Create an azurerm_mssql_elasticpool to define shared resource limits (e.g., eDTUs or vCores). Next, link individual azurerm_mssql_database resources to the pool using the elastic_pool_id argument instead of assigning isolated compute tiers.
+ * **Example:**
+```hcl
+# Create shared Elastic Pool
+resource "azurerm_mssql_elasticpool" "pool" {
+  name                = "sqlelasticpool-prod"
+  resource_group_name = "rg-database"
+  location            = "East US"
+  server_name         = azurerm_mssql_server.sql.name
+  license_type        = "LicenseIncluded"
+
+  sku {
+    name     = "GP_Gen5"
+    tier     = "GeneralPurpose"
+    family   = "Gen5"
+    capacity = 4 # Total vCores for the pool
+  }
+
+  per_database_settings {
+    min_capacity = 0.25
+    max_capacity = 2.0
+  }
+}
+
+# Attach database to Elastic Pool
+resource "azurerm_mssql_database" "db" {
+  name            = "sqldb-orders"
+  server_id       = azurerm_mssql_server.sql.id
+  elastic_pool_id = azurerm_mssql_elasticpool.pool.id
+}
+
+```
+### 5. How do you configure an Azure Standard Load Balancer with Outbound SNAT Rules using Terraform?
+ * **Answer:** Provision an azurerm_lb with a Dedicated Outbound Frontend IP Configuration and associate an azurerm_lb_outbound_rule to grant VMs inside internal backend pools secure outbound internet connectivity without exposing inbound ports.
+ * **Example:**
+```hcl
+resource "azurerm_lb" "lb" {
+  name                = "lb-outbound-prod"
+  location            = "East US"
+  resource_group_name = "rg-networking"
+  sku                 = "Standard" # Standard SKU required for outbound rules
+
+  frontend_ip_configuration {
+    name                 = "outbound-public-ip"
+    public_ip_address_id = azurerm_public_ip.pip.id
+  }
+}
+
+resource "azurerm_lb_backend_address_pool" "bap" {
+  name            = "backend-pool-vms"
+  loadbalancer_id = azurerm_lb.lb.id
+}
+
+resource "azurerm_lb_outbound_rule" "snat_rule" {
+  name                    = "outbound-snat-rule"
+  loadbalancer_id         = azurerm_lb.lb.id
+  protocol                = "All"
+  backend_address_pool_id = azurerm_lb_backend_address_pool.bap.id
+
+  frontend_ip_configuration {
+    name = "outbound-public-ip"
+  }
+}
+
+```
+### 6. How do you implement Azure Virtual WAN (vWAN) with Virtual Hubs and Spoke VNet Connections in Terraform?
+ * **Answer:** Create an azurerm_virtual_wan, establish an azurerm_virtual_hub inside a specific region, and peer regional spoke VNets to the hub using azurerm_virtual_hub_connection.
+ * **Example:**
+```hcl
+# 1. Declare Global Virtual WAN
+resource "azurerm_virtual_wan" "vwan" {
+  name                = "vwan-global-enterprise"
+  resource_group_name = "rg-networking-global"
+  location            = "East US"
+}
+
+# 2. Deploy Regional Virtual Hub
+resource "azurerm_virtual_hub" "hub_eastus" {
+  name                = "vhub-eastus"
+  resource_group_name = "rg-networking-global"
+  location            = "East US"
+  virtual_wan_id      = azurerm_virtual_wan.vwan.id
+  address_prefix      = "10.100.0.0/23"
+}
+
+# 3. Connect Spoke VNet to Virtual Hub
+resource "azurerm_virtual_hub_connection" "spoke_connection" {
+  name                      = "vhub-conn-spoke-app"
+  virtual_hub_id            = azurerm_virtual_hub.hub_eastus.id
+  remote_virtual_network_id = "/subscriptions/.../virtualNetworks/vnet-spoke-app"
+}
+
+```
+### 7. How do you provision Azure Key Vault Access Policies for Service Principals without exposing secrets in code?
+ * **Answer:** Fetch the Service Principal's Object ID dynamically using the azuread_service_principal data source (from the azuread provider) and pass that object ID into azurerm_key_vault_access_policy.
+ * **Example:**
+```hcl
+# Lookup Service Principal by Application ID
+data "azuread_service_principal" "sp" {
+  application_id = "00000000-0000-0000-0000-000000000000"
+}
+
+resource "azurerm_key_vault_access_policy" "sp_policy" {
+  key_vault_id = "/subscriptions/.../vaults/kv-sec-prod"
+  tenant_id    = "11111111-1111-1111-1111-111111111111"
+  object_id    = data.azuread_service_principal.sp.object_id
+
+  secret_permissions = ["Get", "List"]
+}
+
+```
+## Advanced Level Questions
+### 8. How do you integrate Azure API Management (APIM) with Key Vault to bind custom SSL domain certificates in Terraform?
+ * **Answer:** Grant the APIM System-Assigned Identity read access on the Key Vault, fetch the target certificate secret using azurerm_key_vault_certificate, and attach it to the hostname_configuration block of azurerm_api_management.
+ * **Example:**
+```hcl
+resource "azurerm_api_management" "apim" {
+  name                = "apim-enterprise-prod"
+  location            = "East US"
+  resource_group_name = "rg-api"
+  publisher_name      = "Enterprise IT"
+  publisher_email     = "admin@enterprise.com"
+  sku_name            = "Developer_1"
+
+  identity {
+    type = "SystemAssigned"
+  }
+
+  hostname_configuration {
+    proxy {
+      default_ssl_binding = true
+      host_name           = "api.enterprise.com"
+      key_vault_id        = "https://kv-prod.vault.azure.net/secrets/custom-api-cert"
+    }
+  }
+}
+
+```
+### 9. How do you migrate Terraform state between two different Azure Storage Accounts seamlessly without losing state tracking?
+ * **Answer:**
+   1. Update the backend "azurerm" block in main.tf to target the **new** Storage Account or container name.
+   2. Run terraform init -migrate-state.
+   3. Terraform will detect the backend configuration change, verify access to both backends, and automatically copy the current state file to the new location while maintaining lock safety.
+ * **Example Command:**
+```bash
+# Step 1: Update main.tf with new storage account backend settings
+# Step 2: Initialize migration
+terraform init -migrate-state
+
+```
+### 10. How do you deploy preview or unsupported Azure features using the Microsoft azapi_resource provider alongside azurerm?
+ * **Answer:** Use the azapi_resource block from the azure/azapi provider. Specify the type (ARM API resource type and version) and pass resource properties as a structured HCL map or JSON payload using body.
+ * **Example:** Provisioning a preview Azure feature before it exists in azurerm:
+```hcl
+terraform {
+  required_providers {
+    azapi = {
+      source  = "azure/azapi"
+      version = "~> 1.0"
+    }
+  }
+}
+
+provider "azapi" {}
+
+# Deploying an ARM resource using raw REST API schema
+resource "azapi_resource" "preview_feature" {
+  type      = "Microsoft.ContainerInstance/containerGroups@2023-05-01"
+  name      = "aci-preview-app"
+  location  = "East US"
+  parent_id = "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-app"
+
+  body = {
+    properties = {
+      containers = [
+        {
+          name = "web"
+          properties = {
+            image = "mcr.microsoft.com/azuredocs/aci-helloworld"
+            resources = {
+              requests = {
+                cpu    = 1.0
+                memoryInGB = 1.5
+              }
+            }
+            ports = [{ port = 80 }]
+          }
+        }
+      ]
+      osType        = "Linux"
+      ipAddress     = { type = "Public", ports = [{ port = 80, protocol = "TCP" }] }
+    }
+  }
+}
+
+```
