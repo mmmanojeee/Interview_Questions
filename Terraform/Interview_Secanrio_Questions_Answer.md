@@ -1461,3 +1461,77 @@ resource "azurerm_log_analytics_workspace" "law" {
      3. **Shift Traffic:** Update routing rule parameters in the azurerm_frontdoor_routing_rule or App Service Slot swap configuration in Terraform.
      4. **Decommission Blue:** After traffic successfully shifts, remove or disable the blue module block via Terraform variables to tear down older infrastructure cleanly.
 
+---
+
+Here is a **fifth set** of unique Terraform interview questions and answers, focused exclusively on Microsoft Azure scenarios. None of these questions repeat topics covered in previous sets.
+## Basic Level Questions
+### 1. What is the .terraform working directory, what does it store, and should it be committed to version control?
+ * **Answer:**
+   * **Function:** The .terraform folder is an operational cache directory created when you run terraform init.
+   * **Contents:** It contains downloaded provider binaries (such as azurerm and azapi), cached registry modules, backend initialization configurations, and provider schemas.
+   * **Best Practice:** **Do not commit** .terraform to version control (add it to .gitignore). It contains machine-specific binary files that should be re-downloaded per environment or runner using terraform init.
+### 2. How can you configure Azure provider credentials dynamically via environment variables without hardcoding secrets in providers.tf?
+ * **Answer:**
+   * Terraform automatically reads environment variables prefixed with ARM_ to authenticate against Azure APIs.
+   * **Common Environment Variables:**
+     * ARM_SUBSCRIPTION_ID: Azure Subscription ID.
+     * ARM_CLIENT_ID: Service Principal Application ID (or Managed Identity Client ID).
+     * ARM_CLIENT_SECRET: Service Principal Secret.
+     * ARM_TENANT_ID: Microsoft Entra ID Tenant ID.
+     * ARM_USE_OIDC: Set to true when using Workload Identity / GitHub OIDC token authentication.
+   * **Benefit:** Allows identical Terraform code to be deployed across multiple environments (Dev/Stage/Prod) simply by changing environment variables in execution runners.
+### 3. What is terraform console, and how is it used when developing Azure infrastructure configurations?
+ * **Answer:**
+   * terraform console provides an interactive command-line shell for evaluating HCL functions and expressions against your active state file.
+   * **Use Case in Azure:** Testing complex HCL functions—such as parsing CIDR blocks (cidrsubnet("10.0.0.0/16", 8, 1)), evaluating dynamic naming maps, or validating custom regular expressions for Azure resource tags—before adding them to .tf files.
+## Intermediate Level Questions
+### 4. How do you handle Azure Resource Locks (e.g., CanNotDelete or ReadOnly) in Terraform, and what challenges do they introduce?
+ * **Answer:**
+   * **Purpose:** Resource Locks (configured via azurerm_management_lock) prevent accidental deletion or modification of critical Azure infrastructure (e.g., Production SQL Databases or Key Vaults).
+   * **Challenge:** If a lock exists on a resource group or resource, subsequent terraform destroy or plan updates requiring resource recreation will fail at the Azure API level.
+   * **Resolution:** Declare proper depends_on relationships between the resource and its lock, or use pipeline steps to temporarily release/disable the lock prior to controlled destroy steps.
+### 5. What is the Microsoft AzAPI provider (azure/azapi), and when should you use it alongside azurerm?
+ * **Answer:**
+   * **Definition:** The AzAPI provider is a thin wrapper over the raw Azure Resource Manager (ARM) REST APIs managed directly by Microsoft.
+   * **When to use:**
+     * **Day-0 Support:** Deploying newly released Azure preview services or features that are not yet available in the standard azurerm provider.
+     * **Granular Updates:** Modifying specific ARM JSON properties directly without waiting for a full azurerm provider update.
+   * **Coexistence:** It works seamlessly alongside azurerm, sharing the same state file and authentication setup.
+### 6. How can you optimize long execution times for terraform plan or terraform apply in large Azure enterprise state files?
+ * **Answer:**
+   * **Targeting Refresh:** Run terraform plan -refresh=false during iterative code development to bypass checking Azure API state across thousands of untouched resources.
+   * **Parallelism Control:** Increase or decrease parallel API calls using -parallelism=n (default is 10) to adjust concurrent requests made to ARM APIs without hitting Azure ARM rate limits.
+   * **State Deconstruct/Refactoring:** Split monolithic state files into domain-driven state files (Networking, Compute, Governance) linked via Data Sources.
+## Advanced Level Questions
+### 7. How do you implement native unit testing using the terraform test framework (.tftest.hcl) for Azure modules?
+ * **Answer:**
+   * **Overview:** Introduced in modern Terraform releases, .tftest.hcl files allow you to write unit and integration assertions directly in native HCL without external Go/Python tools like Terratest.
+   * **Structure:** Consists of run blocks executing plan or apply commands coupled with assert blocks.
+   * **Example:**
+```hcl
+# tests/vnet_test.tftest.hcl
+run "verify_subnet_address_prefix" {
+  command = plan
+
+  assert {
+    condition     = azurerm_subnet.app.address_prefixes[0] == "10.0.1.0/24"
+    error_message = "App subnet CIDR block must be restricted to 10.0.1.0/24."
+  }
+}
+
+```
+### 8. How do you handle Azure Role-Based Access Control (RBAC) role assignments dynamically at scale using Terraform without hitting API throttling?
+ * **Answer:**
+   * **Problem:** Assigning multiple Azure RBAC roles to many Azure Managed Identities across subscriptions can lead to API rate limiting or duplicate assignment errors.
+   * **Solution:**
+     * Group role definitions into custom RBAC definitions where possible.
+     * Flatten identity-to-role mappings using nested maps and for_each on azurerm_role_assignment.
+     * Use deterministic UUID generation via HCL (uuidv5("url", "${scope}-${principal_id}-${role_definition_name}")) in the name parameter of azurerm_role_assignment to make assignments idempotent across runs.
+### 9. How do you manage Azure Key Vault secret rotation gracefully using Terraform without causing service disruptions?
+ * **Answer:**
+   * **Problem:** Changing a secret value (like a database connection string) in Key Vault can break dependent compute apps if not synced properly.
+   * **Solution:**
+     * Store versioned secrets or use time_rotating provider resources to generate secrets on a recurring schedule.
+     * Update Key Vault secrets (azurerm_key_vault_secret) while using lifecycle { create_before_destroy = true }.
+     * Leverage Azure Key Vault Event Grid notifications connected to App Service deployment slots or AKS secret provider daemons (CSI driver) to automatically pull updated secrets into running pods without restarting the cluster.
+
