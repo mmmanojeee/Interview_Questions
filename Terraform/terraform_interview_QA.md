@@ -120,4 +120,126 @@ A curated set of advanced Terraform + Azure interview questions, organized by do
 - **Candidates:** Use the **Focus** notes as a checklist — a strong answer should touch on most of the listed concepts, not just define the primary term.
 - **Scenario questions** are best answered with a structured approach: *diagnose → immediate mitigation → long-term fix → prevention*.
 
+---
 
+Here is a **seventh set** of brand-new, unique Terraform interview questions and answers tailored specifically for Microsoft Azure. None of these repeat topics covered previously.
+### Basic Level Questions
+#### 1. What is the difference between terraform apply and terraform apply -auto-approve? When should -auto-approve be used?
+ * **Answer:**
+   * terraform apply: Generates an execution plan, displays all proposed infrastructure additions, modifications, or deletions, and prompts the user for an explicit interactive confirmation (yes) before applying changes to Azure.
+   * terraform apply -auto-approve: Bypasses the interactive prompt and immediately applies the changes.
+   * **Use Case:** -auto-approve is designed for automated non-interactive CI/CD pipelines (e.g., Azure DevOps or GitHub Actions) where an explicit plan approval gate has already taken place in a prior review stage.
+#### 2. What is the difference between a Provider and a Module in Terraform, and how do you declare provider requirements inside a child module?
+ * **Answer:**
+   * **Provider:** A plugin (e.g., azurerm or azuread) that translates HCL code into API calls to manage cloud resources.
+   * **Module:** A collection of .tf files in a directory that groups related Azure resources together for reusability.
+   * **Child Module Provider Declaration:** Child modules should declare required providers and minimum versions inside a required_providers block, but **should not** configure provider instantiation parameters (like authentication credentials or features {} blocks). Provider configurations belong exclusively in the root module.
+#### 3. How does location inheritance work between an Azure Resource Group and the resources inside it?
+ * **Answer:**
+   * Defining location on an azurerm_resource_group specifies where the resource group’s **metadata** is stored.
+   * Resources within that resource group do **not** automatically inherit its region. Each child resource (e.g., azurerm_virtual_network) explicitly sets its own location parameter.
+   * **Best Practice:** Pass the resource group's location property directly to dependent child resources (location = azurerm_resource_group.rg.location) to ensure regional alignment and avoid unexpected cross-region latency or bandwidth costs.
+### Intermediate Level Questions
+#### 4. How do you implement global resource tagging consistently across Azure resources using default_tags?
+ * **Answer:**
+   * Instead of manually specifying tag maps on every individual resource block, you can configure default_tags at the azurerm provider level.
+   * **Implementation:**
+     ```hcl
+     provider "azurerm" {
+       features {}
+       default_tags {
+         tags = {
+           Environment = var.environment
+           ManagedBy   = "Terraform"
+           CostCenter  = "IT-Ops"
+         }
+       }
+     }
+     
+     ```
+   * **Behavior:** Terraform automatically merges default tags into every taggable Azure resource created under that provider instance. Resource-level tags take precedence if key conflicts occur.
+#### 5. How do you handle Azure Kubernetes Service (AKS) node pool upgrades and dynamic expansion using Terraform?
+ * **Answer:**
+   * **Dynamic Node Pools:** Use for_each on azurerm_kubernetes_cluster_node_pool to provision additional system or user node pools dynamically based on workload configuration maps.
+   * **Safe Cluster Upgrades:**
+     * Explicitly set orchestrator_version and use lifecycle { ignore_changes = [ default_node_pool[0].node_count ] } if Azure autoscaling (cluster-autoscaler) is enabled, preventing Terraform from constantly resetting node counts.
+     * Define upgrade_settings inside node pool definitions to configure max surge parameters (e.g., max_surge = "33%"), ensuring zero-downtime rolling upgrades when bumping Kubernetes versions.
+#### 6. How do you configure Customer-Managed Keys (CMK) for Azure Storage Account or Key Vault encryption in Terraform?
+ * **Answer:**
+   * Encrypting data at rest using CMK requires chaining dependencies across Key Vault, Managed Identity, and Storage components:
+     1. Create a User-Assigned Managed Identity (azurerm_user_assigned_identity).
+     2. Grant the Identity Key Vault access permissions (azurerm_key_vault_access_policy or Azure RBAC role).
+     3. Generate a Key Vault Key (azurerm_key_vault_key).
+     4. Link the key and identity to the storage account via azurerm_storage_account_customer_managed_key:
+       ```hcl
+       resource "azurerm_storage_account_customer_managed_key" "cmk" {
+         storage_account_id = azurerm_storage_account.st.id
+         key_vault_id       = azurerm_key_vault.kv.id
+         key_name           = azurerm_key_vault_key.key.name
+         user_assigned_identity_id = azurerm_user_assigned_identity.identity.id
+       }
+       
+       ```
+### Advanced Level Questions
+#### 7. How do you resolve stuck backend state locks (terraform force-unlock) when using Azure Blob Storage?
+ * **Answer:**
+   * **Cause:** If a CI/CD job crashes or network connectivity breaks during terraform apply, the lease on the Azure Blob holding the terraform.tfstate file may remain locked.
+   * **Resolution Steps:**
+     1. Retrieve the **Lock ID** displayed in the CLI error message.
+     2. Ensure no active pipeline or engineer is running an apply operation.
+     3. Execute:
+       ```bash
+       terraform force-unlock <LOCK-ID>
+       
+       ```
+     4. **Alternative (Azure Portal / CLI):** If force-unlock fails, break the lease directly on the target .tfstate blob within the Azure Storage Account via Azure Portal or az storage blob lease break.
+#### 8. How do you combine azurerm, kubernetes, and helm providers in a single Terraform project to deploy infra and apps to AKS?
+ * **Answer:**
+   * **Architecture:** Use azurerm to build the AKS cluster, and pass cluster credentials dynamically into the kubernetes and helm providers using provider configuration blocks.
+   * **Example Configuration:**
+     ```hcl
+     provider "azurerm" {
+       features {}
+     }
+     
+     resource "azurerm_kubernetes_cluster" "aks" {
+       name                = "aks-prod"
+       location            = azurerm_resource_group.rg.location
+       resource_group_name = azurerm_resource_group.rg.name
+       dns_prefix          = "aksprod"
+       # ...
+     }
+     
+     provider "kubernetes" {
+       host                   = azurerm_kubernetes_cluster.aks.kube_config.0.host
+       client_certificate     = base64decode(azurerm_kubernetes_cluster.aks.kube_config.0.client_certificate)
+       client_key             = base64decode(azurerm_kubernetes_cluster.aks.kube_config.0.client_key)
+       cluster_ca_certificate = base64decode(azurerm_kubernetes_cluster.aks.kube_config.0.cluster_ca_certificate)
+     }
+     
+     provider "helm" {
+       kubernetes {
+         host                   = azurerm_kubernetes_cluster.aks.kube_config.0.host
+         client_certificate     = base64decode(azurerm_kubernetes_cluster.aks.kube_config.0.client_certificate)
+         client_key             = base64decode(azurerm_kubernetes_cluster.aks.kube_config.0.client_key)
+         cluster_ca_certificate = base64decode(azurerm_kubernetes_cluster.aks.kube_config.0.cluster_ca_certificate)
+       }
+     }
+     
+     ```
+   * **Enterprise Best Practice:** For production setups, separate the cluster provisioning (infrastructure) code from the application deployment (Helm/Kubernetes) code into distinct state files to avoid authentication lookup issues on initial cluster creation.
+#### 9. How do you automate Azure Private Endpoint DNS Zone Links and Private Endpoint DNS record registration in Terraform?
+ * **Answer:**
+   * When attaching a Private Endpoint to a PaaS service (e.g., Azure SQL or Key Vault), private IP resolution requires an Azure Private DNS Zone.
+   * **Steps:**
+     1. Create the Private DNS Zone (e.g., privatelink.vaultcore.azure.net) using azurerm_private_dns_zone.
+     2. Link the Private DNS Zone to the local Virtual Network using azurerm_private_dns_zone_virtual_network_link.
+     3. Define an azurerm_private_endpoint and configure its private_dns_zone_group block:
+       ```hcl
+       private_dns_zone_group {
+         name                 = "kv-dns-zone-group"
+         private_dns_zone_ids = [azurerm_private_dns_zone.kv_dns.id]
+       }
+       
+       ```
+     4. Azure automatically manages the creation and lifecycle of the target A record inside the Private DNS Zone matching the allocated private IP.
