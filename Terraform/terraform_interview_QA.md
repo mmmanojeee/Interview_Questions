@@ -2908,3 +2908,296 @@ resource "azurerm_subscription_policy_remediation" "remediate_existing" {
 }
 
 ```
+
+---
+
+Here is a **nineteenth set** of brand-new, scenario-based Terraform and Microsoft Azure interview questions and answers. Each question follows the student-friendly format with **The Concept**, **The Interview Answer**, and an **HCL Code Example**.
+## Basic Level Questions
+### 1. How do you configure a System-Assigned vs User-Assigned Managed Identity on an Azure Linux VM?
+ * **The Concept:** Think of a **System-Assigned Identity** as a driver's license tied to a specific car—if the car is scrapped, the license vanishes with it. A **User-Assigned Identity** is like a physical keycard—you create it separately, and you can hand it to one car, multiple cars, or transfer it whenever you like.
+ * **The Interview Answer:** * **System-Assigned:** Defined directly inside the azurerm_linux_virtual_machine resource using identity { type = "SystemAssigned" }. Azure manages its lifecycle automatically.
+   * **User-Assigned:** Created independently using azurerm_user_assigned_identity and attached to the VM via identity { type = "UserAssigned", identity_ids = [...] }.
+ * **HCL Example:**
+```hcl
+# 1. Independent User-Assigned Identity
+resource "azurerm_user_assigned_identity" "custom_id" {
+  name                = "id-vm-app-prod"
+  location            = "East US"
+  resource_group_name = "rg-compute"
+}
+
+# 2. Linux VM with BOTH System-Assigned and User-Assigned Identities
+resource "azurerm_linux_virtual_machine" "vm" {
+  name                = "vm-app-prod"
+  resource_group_name = "rg-compute"
+  location            = "East US"
+  size                = "Standard_B2s"
+  admin_username      = "azureuser"
+
+  # Configures both identity types simultaneously
+  identity {
+    type         = "SystemAssigned, UserAssigned"
+    identity_ids = [azurerm_user_assigned_identity.custom_id.id]
+  }
+
+  # ... Network interface and OS disk settings ...
+}
+
+```
+### 2. How do you filter and transform lists using HCL for expressions with if conditions?
+ * **The Concept:** Imagine you have a basket containing apples, oranges, and bananas. A for expression with an if clause lets you say: "Go through the basket, pick *only* the apples, and convert their names to UPPERCASE."
+ * **The Interview Answer:** HCL for expressions allow you to iterate over lists or maps, transform attributes, and filter elements based on boolean conditions (if). This is commonly used to extract specific IP prefixes or public subnets from complex variable objects.
+ * **HCL Example:**
+```hcl
+variable "subnets" {
+  type = map(object({
+    cidr      = string
+    is_public = bool
+  }))
+  default = {
+    "snet-web" = { cidr = "10.0.1.0/24", is_public = true }
+    "snet-app" = { cidr = "10.0.2.0/24", is_public = false }
+    "snet-db"  = { cidr = "10.0.3.0/24", is_public = false }
+  }
+}
+
+locals {
+  # Filters map to pick ONLY private subnets and extracts their CIDRs into a list
+  private_subnet_cidrs = [
+    for subnet_name, subnet_obj in var.subnets : subnet_obj.cidr
+    if subnet_obj.is_public == false
+  ] # Evaluates to ["10.0.2.0/24", "10.0.3.0/24"]
+}
+
+```
+### 3. What is the difference between azurerm_key_vault_secret and azurerm_key_vault_key in Terraform?
+ * **The Concept:** An **Azure Key Vault Secret** is like storing a plain piece of paper inside a safe (e.g., a database connection string or API token). An **Azure Key Vault Key** is like putting a master key-cutting machine inside the safe—it performs hardware-based mathematical encryption (RSA/EC) without ever revealing the private key.
+ * **The Interview Answer:** * azurerm_key_vault_secret: Stores string data (passwords, certificates, API tokens) as plain text in Key Vault.
+   * azurerm_key_vault_key: Generates and manages cryptographic key pairs (RSA, Elliptic Curve) used for Customer-Managed Key (CMK) disk encryption, data signing, and decryption.
+ * **HCL Example:**
+```hcl
+# Secret: Stores textual database connection string
+resource "azurerm_key_vault_secret" "db_conn" {
+  name         = "sql-connection-string"
+  value        = "Server=sql.database.windows.net;Database=db;User=admin;"
+  key_vault_id = "/subscriptions/.../vaults/kv-prod"
+}
+
+# Key: Generates RSA 2048-bit Cryptographic Key for Disk Encryption
+resource "azurerm_key_vault_key" "cmk_key" {
+  name         = "cmk-disk-encryption-key"
+  key_vault_id = "/subscriptions/.../vaults/kv-prod"
+  key_type     = "RSA"
+  key_size     = 2048
+
+  key_opts = ["decrypt", "encrypt", "unwrapKey", "wrapKey"]
+}
+
+```
+## Intermediate Level Questions
+### 4. How do you configure an Azure Backup Vault Policy for VMs using Terraform?
+ * **The Concept:** Creating a Recovery Services Vault gives you a backup location, but a **Backup Policy** defines the schedule—like "take a snapshot every day at 2:00 AM and keep weekly backups for 30 days." You then link that policy to specific Virtual Machines.
+ * **The Interview Answer:** Provision an azurerm_recovery_services_vault, define schedule parameters using azurerm_backup_policy_vm, and link target Virtual Machines to the policy using azurerm_backup_protected_vm.
+ * **HCL Example:**
+```hcl
+# 1. Recovery Services Vault
+resource "azurerm_recovery_services_vault" "vault" {
+  name                = "rsv-backup-prod"
+  location            = "East US"
+  resource_group_name = "rg-backup"
+  sku                 = "Standard"
+}
+
+# 2. Daily VM Backup Policy
+resource "azurerm_backup_policy_vm" "policy" {
+  name                = "policy-daily-vm-backup"
+  resource_group_name = "rg-backup"
+  recovery_vault_name = azurerm_recovery_services_vault.vault.name
+
+  backup {
+    frequency = "Daily"
+    time      = "02:00"
+  }
+
+  retention_daily {
+    count = 14 # Retains daily backups for 14 days
+  }
+}
+
+# 3. Attach Policy to Azure VM
+resource "azurerm_backup_protected_vm" "protected_vm" {
+  resource_group_name = "rg-backup"
+  recovery_vault_name = azurerm_recovery_services_vault.vault.name
+  source_vm_id        = "/subscriptions/.../virtualMachines/vm-app-prod"
+  backup_policy_id    = azurerm_backup_policy_vm.policy.id
+}
+
+```
+### 5. How do you configure Azure Logic Apps (Consumption) with custom HTTP triggers using Terraform?
+ * **The Concept:** An Azure Logic App is a visual workflow builder. In Terraform, you write the workflow JSON structure into an azurerm_logic_app_workflow and attach a trigger (like an HTTP endpoint) so external systems can kick off the automation.
+ * **The Interview Answer:** Declare an azurerm_logic_app_workflow and use azurerm_logic_app_trigger_custom to define incoming triggers (e.g., JSON schema payloads received over HTTP) using valid JSON syntax.
+ * **HCL Example:**
+```hcl
+resource "azurerm_logic_app_workflow" "workflow" {
+  name                = "logic-alert-processor-prod"
+  location            = "East US"
+  resource_group_name = "rg-automation"
+}
+
+# Define HTTP Post Trigger receiving Webhook JSON payloads
+resource "azurerm_logic_app_trigger_custom" "http_trigger" {
+  name         = "When_HTTP_Request_Is_Received"
+  logic_app_id = azurerm_logic_app_workflow.workflow.id
+
+  body = jsonencode({
+    type = "Request"
+    kind = "Http"
+    inputs = {
+      schema = {
+        type = "object"
+        properties = {
+          alertName   = { type = "string" }
+          severity    = { type = "string" }
+        }
+      }
+    }
+  })
+}
+
+```
+### 6. How do you configure an Azure Event Hub Schema Registry using Terraform?
+ * **The Concept:** When microservices stream millions of events per second, they need to agree on data formatting (e.g., Avro or JSON schemas). The Schema Registry acts as a centralized contract validator ensuring producers send correctly structured events.
+ * **The Interview Answer:** Provision an azurerm_eventhub_namespace (Standard/Premium tier) and construct an azurerm_eventhub_namespace_schema_group specifying the schema_type (e.g., Avro) and schema_compatibility rules.
+ * **HCL Example:**
+```hcl
+resource "azurerm_eventhub_namespace" "eh_ns" {
+  name                = "ehns-streaming-prod"
+  location            = "East US"
+  resource_group_name = "rg-data"
+  sku                 = "Standard"
+}
+
+resource "azurerm_eventhub_namespace_schema_group" "schema_group" {
+  name                 = "schema-group-orders"
+  namespace_id         = azurerm_eventhub_namespace.eh_ns.id
+  schema_compatibility = "Forward" # Enforces forward schema evolution compatibility
+  schema_type          = "Avro"
+}
+
+```
+### 7. How do you enforce Entra ID (Azure AD) Only Authentication on Azure SQL Database using Terraform?
+ * **The Concept:** Traditional SQL servers use local usernames and passwords (like sa / sqladmin), which can be brute-forced or leaked. "Entra ID Only Auth" disables traditional password logins entirely and forces every user and application to authenticate via Microsoft Entra ID tokens or Managed Identities.
+ * **The Interview Answer:** In azurerm_mssql_server, configure an azuread_administrator block specifying the admin object ID, and set azuread_authentication_only = true.
+ * **HCL Example:**
+```hcl
+resource "azurerm_mssql_server" "sql" {
+  name                         = "sql-secure-prod-001"
+  resource_group_name          = "rg-data"
+  location                     = "East US"
+  version                      = "12.0"
+  
+  # Disables local SQL admin logins; enforces Microsoft Entra ID authentication exclusively
+  azuread_authentication_only = true
+
+  azuread_administrator {
+    login_username              = "Entra SQL Admins"
+    object_id                   = "00000000-0000-0000-0000-000000000000" # Group Object ID
+    azuread_authentication_only = true
+  }
+}
+
+```
+## Advanced Level Questions
+### 8. How do you configure Azure Route Server to dynamically peer with a Network Virtual Appliance (NVA) using Terraform?
+ * **The Concept:** In a hub-and-spoke network, updating static route tables across 50 spoke subnets every time a new network opens is painful. **Azure Route Server** uses BGP (Border Gateway Protocol) to exchange routes dynamically between your firewalls/NVAs and all spokes without manual route tables.
+ * **The Interview Answer:** Create a dedicated subnet named RouteServerSubnet, provision azurerm_route_server, and configure BGP peering with the firewall/NVA using azurerm_route_server_bgp_connection.
+ * **HCL Example:**
+```hcl
+# Subnet MUST be named 'RouteServerSubnet'
+resource "azurerm_subnet" "routeserver_subnet" {
+  name                 = "RouteServerSubnet"
+  resource_group_name  = "rg-networking-hub"
+  virtual_network_name = "vnet-hub"
+  address_prefixes     = ["10.0.4.0/24"]
+}
+
+# Azure Route Server Instance
+resource "azurerm_route_server" "rs" {
+  name                 = "routeserver-hub"
+  resource_group_name  = "rg-networking-hub"
+  location             = "East US"
+  subnet_id            = azurerm_subnet.routeserver_subnet.id
+  public_ip_address_id = "/subscriptions/.../publicIPAddresses/pip-rs"
+}
+
+# BGP Peering Connection to NVA / Firewall
+resource "azurerm_route_server_bgp_connection" "nva_peer" {
+  name            = "bgp-peer-nva-firewall"
+  route_server_id = azurerm_route_server.rs.id
+  peer_asn        = 65001        # NVA Autonomous System Number
+  peer_ip         = "10.0.1.4"   # NVA Private IP Address
+}
+
+```
+### 9. How do you deploy an Azure Confidential Virtual Machine (AMD SEV-SNP) using Terraform?
+ * **The Concept:** Standard VMs encrypt data on disk and in transit, but memory (RAM) is unencrypted while running. **Confidential VMs** encrypt data *in memory* using hardware-enforced cryptographic boundaries (AMD SEV-SNP or Intel TDX), protecting processing data from hypervisors or cloud admins.
+ * **The Interview Answer:** In azurerm_linux_virtual_machine, select a Confidential VM SKU size (e.g., Standard_DC2as_v5), enable vtpm_enabled and secure_boot_enabled, and set security_encryption_type = "DiskWithVMGuestState".
+ * **HCL Example:**
+```hcl
+resource "azurerm_linux_virtual_machine" "confidential_vm" {
+  name                = "cvm-secure-compute"
+  resource_group_name = "rg-sec-compute"
+  location            = "East US"
+  size                = "Standard_DC2as_v5" # Confidential VM SKU
+  admin_username      = "azureuser"
+
+  # Enables Confidential Hardware Security features
+  vtpm_enabled        = true
+  secure_boot_enabled = true
+
+  os_disk {
+    caching                  = "ReadWrite"
+    storage_account_type     = "Premium_LRS"
+    security_encryption_type = "DiskWithVMGuestState" # Enforces Confidential Disk Encryption
+  }
+
+  # ... Network interface and OS image reference settings ...
+}
+
+```
+### 10. How do you perform Multi-Tenant Azure Authentication across separate Entra ID Tenants using Provider Aliases?
+ * **The Concept:** Imagine an MSP (Managed Service Provider) managing infrastructure for Client A (Tenant A) and Client B (Tenant B). A single Terraform script can deploy resources into both clients simultaneously using multi-tenant provider aliases.
+ * **The Interview Answer:** Declare two provider "azurerm" blocks with distinct alias identifiers. Supply the specific tenant_id and subscription_id for each tenant. Bind individual resource blocks to their respective tenant provider using provider = azurerm.<alias_name>.
+ * **HCL Example:**
+```hcl
+# Provider for Tenant A (Client Alpha)
+provider "azurerm" {
+  alias           = "tenant_a"
+  tenant_id       = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"
+  subscription_id = "11111111-1111-1111-1111-111111111111"
+  features {}
+}
+
+# Provider for Tenant B (Client Beta)
+provider "azurerm" {
+  alias           = "tenant_b"
+  tenant_id       = "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"
+  subscription_id = "22222222-2222-2222-2222-222222222222"
+  features {}
+}
+
+# Resource deployed into Tenant A
+resource "azurerm_resource_group" "rg_a" {
+  provider = azurerm.tenant_a
+  name     = "rg-client-alpha-prod"
+  location = "East US"
+}
+
+# Resource deployed into Tenant B
+resource "azurerm_resource_group" "rg_b" {
+  provider = azurerm.tenant_b
+  name     = "rg-client-beta-prod"
+  location = "West US"
+}
+
+```
