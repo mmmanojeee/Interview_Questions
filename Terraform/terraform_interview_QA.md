@@ -437,3 +437,193 @@ output "kv_secret_uri" {
 }
 
 ```
+
+---
+
+Here is a **ninth set** of interview questions and practical HCL code examples focusing on advanced, scenario-based Azure Terraform configurations.
+## Basic Level Questions
+### 1. How do you override default variable values using a custom .tfvars file during terraform plan or apply?
+ * **Answer:** You can explicitly pass a custom variable definitions file at execution time using the -var-file command-line flag.
+ * **Scenario:** Applying a specific staging configuration file (staging.tfvars) instead of defaults.
+```hcl
+# execution command:
+# terraform plan -var-file="environments/staging.tfvars"
+
+```
+```hcl
+# environments/staging.tfvars
+environment_name = "staging"
+vm_count         = 2
+sku_tier         = "Standard_B2s"
+
+```
+### 2. How do you append custom tags to default tags declared in the Azure provider?
+ * **Answer:** Individual resource blocks automatically inherit provider-level default_tags. When you define specific tags inside a resource block, Terraform merges them, letting the resource-level tags override matching keys or add unique ones.
+ * **Example:**
+```hcl
+provider "azurerm" {
+  features {}
+  default_tags {
+    tags = {
+      Owner     = "DevOps-Team"
+      ManagedBy = "Terraform"
+    }
+  }
+}
+
+resource "azurerm_resource_group" "rg" {
+  name     = "rg-app-prod"
+  location = "East US"
+
+  # Adds or overrides tags for this specific resource
+  tags = {
+    CostCenter = "CC-1092"
+    Owner      = "App-Team" # Overrides provider default tag
+  }
+}
+
+```
+## Intermediate Level Questions
+### 3. How do you implement Azure App Service Deployment Slots using Terraform for zero-downtime application releases?
+ * **Answer:** Define the primary App Service and its staging slot using azurerm_linux_web_app_slot. Configure settings so that environment variables and connection strings swap seamlessly between deployment slots.
+ * **Example:**
+```hcl
+resource "azurerm_service_plan" "plan" {
+  name                = "asp-web-prod"
+  resource_group_name = "rg-web"
+  location            = "East US"
+  os_type             = "Linux"
+  sku_name            = "P1v2"
+}
+
+# Production Primary App Slot
+resource "azurerm_linux_web_app" "app" {
+  name                = "app-web-prod-001"
+  resource_group_name = "rg-web"
+  location            = "East US"
+  service_plan_id     = azurerm_service_plan.plan.id
+
+  site_config {}
+}
+
+# Staging Slot for Blue/Green Releases
+resource "azurerm_linux_web_app_slot" "staging" {
+  name           = "staging"
+  app_service_id = azurerm_linux_web_app.app.id
+
+  site_config {}
+}
+
+```
+### 4. How do you configure dynamic subnet delegation for Azure PaaS services (e.g., Azure Databricks or App Service VNet Integration)?
+ * **Answer:** Inside azurerm_subnet, define a nested delegation block targeting the actions required by the specific Azure PaaS service.
+ * **Example:** Delegating a subnet to Azure Web Apps for regional VNet Integration:
+```hcl
+resource "azurerm_subnet" "app_service_subnet" {
+  name                 = "snet-app-integration"
+  resource_group_name  = "rg-networking"
+  virtual_network_name = "vnet-hub"
+  address_prefixes     = ["10.0.10.0/24"]
+
+  delegation {
+    name = "app-service-delegation"
+
+    service_delegation {
+      name    = "Microsoft.Web/serverFarms"
+      actions = ["Microsoft.Network/virtualNetworks/subnets/action"]
+    }
+  }
+}
+
+```
+### 5. How do you securely handle sensitive outputs using Key Vault References without outputting secrets in CLI summaries?
+ * **Answer:** Read raw credentials using data sources or dynamic generators, store them in Key Vault, and set sensitive = true on output blocks.
+ * **Example:**
+```hcl
+resource "azurerm_key_vault_secret" "db_password" {
+  name         = "db-admin-pass"
+  value        = "SuperSecretPassword123!"
+  key_vault_id = "/subscriptions/.../vaults/kv-prod"
+}
+
+output "db_password_secret_id" {
+  value       = azurerm_key_vault_secret.db_password.id
+  sensitive   = true # Prevents secret rendering during terraform apply
+  description = "The secret URI to pass to key vault integration modules."
+}
+
+```
+## Advanced Level Questions
+### 6. How do you manage Azure Policy Assignments with compliance parameters using Terraform?
+ * **Answer:** Use azurerm_subscription_policy_assignment or azurerm_resource_group_policy_assignment to target governance rules at defined scopes. Parameters are passed using valid JSON syntax.
+ * **Example:** Enforcing explicit allowed locations across a subscription:
+```hcl
+resource "azurerm_subscription_policy_assignment" "audit_locations" {
+  name                 = "enforce-allowed-locations"
+  subscription_id      = "/subscriptions/00000000-0000-0000-0000-000000000000"
+  policy_definition_id = "/providers/Microsoft.Authorization/policyDefinitions/e56962a6-4747-49cd-b67b-bf7b01975c4c" # Built-in Allowed Locations Policy
+
+  parameters = jsonencode({
+    "listOfAllowedLocations" = {
+      "value" = ["eastus", "eastus2"]
+    }
+  })
+}
+
+```
+### 7. How do you map dynamic roles across multiple Azure Resource Groups using nested loops and flatten expressions?
+ * **Answer:** When assigning multiple Azure RBAC roles across multiple target resource groups, flat list structures are needed for for_each. Use a nested for expression wrapped inside flatten().
+ * **Example:**
+```hcl
+locals {
+  user_roles = {
+    "user-group-alpha" = {
+      rgs   = ["rg-dev-app", "rg-dev-data"]
+      roles = ["Contributor", "Log Analytics Contributor"]
+    }
+  }
+
+  # Flatten nested maps into a list of objects
+  assignments = flatten([
+    for group_key, group_val in locals.user_roles : [
+      for rg in group_val.rgs : [
+        for role in group_val.roles : {
+          key   = "${group_key}-${rg}-${role}"
+          rg    = rg
+          role  = role
+        }
+      ]
+    ]
+  ])
+}
+
+# Convert flattened list into a map for for_each iteration
+resource "azurerm_role_assignment" "mapped_roles" {
+  for_each             = { for item in locals.assignments : item.key => item }
+  scope                = "/subscriptions/.../resourceGroups/${each.value.rg}"
+  role_definition_name = each.value.role
+  principal_id         = "00000000-0000-0000-0000-000000000000" # Target Group Object ID
+}
+
+```
+### 8. How do you perform automated resource post-validation using Terraform custom postcondition blocks?
+ * **Answer:** Declare a postcondition block inside a resource's lifecycle configuration to validate runtime state outputs returned by Azure APIs right after resource provisioning completes.
+ * **Example:** Ensuring an Azure Storage Account requires HTTPS traffic after creation:
+```hcl
+resource "azurerm_storage_account" "st" {
+  name                     = "stappdata001"
+  resource_group_name      = "rg-data"
+  location                 = "East US"
+  account_tier             = "Standard"
+  account_replication_type = "LRS"
+
+  lifecycle {
+    postcondition {
+      condition     = self.enable_https_traffic_only == true
+      error_message = "Security compliance failure: Storage Account must enforce HTTPS traffic only."
+    }
+  }
+}
+
+```
+
