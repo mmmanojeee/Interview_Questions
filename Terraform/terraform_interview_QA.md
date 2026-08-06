@@ -871,3 +871,253 @@ resource "azurerm_private_endpoint" "kv_pe" {
 
 ```
 
+---
+
+Here is an **eleventh set** of 10 detailed, scenario-focused Terraform and Microsoft Azure interview questions with practical HCL code examples.
+## Basic Level Questions
+### 1. How do you declare and manage Provider Aliases for deploying resources across multiple Azure Regions in the same codebase?
+ * **Answer:** * Define a primary provider without an alias and one or more secondary providers using the alias argument.
+   * Resources declare which region they target by explicitly referencing the provider = azurerm.<alias_name> meta-argument.
+ * **Example:**
+```hcl
+# Primary Azure Region (East US)
+provider "azurerm" {
+  features {}
+}
+
+# Secondary Azure Region (West US) for Disaster Recovery
+provider "azurerm" {
+  alias    = "dr"
+  features {}
+  location = "West US"
+}
+
+# Resource Group created in West US
+resource "azurerm_resource_group" "rg_dr" {
+  provider = azurerm.dr
+  name     = "rg-app-dr-westus"
+  location = "West US"
+}
+
+```
+### 2. What is the ignore_changes lifecycle rule, and how do you prevent Terraform from overriding Azure Auto-Scaling modifications?
+ * **Answer:** * Azure App Services, Virtual Machine Scale Sets, or AKS Clusters frequently modify attributes (e.g., instance counts or tags) dynamically via auto-scaling rules or policy engines.
+   * The ignore_changes lifecycle meta-argument instructs Terraform to ignore drift on specified attributes during terraform plan and apply operations.
+ * **Example:**
+```hcl
+resource "azurerm_linux_virtual_machine_scale_set" "vmss" {
+  name                = "vmss-app-prod"
+  resource_group_name = "rg-app"
+  location            = "East US"
+  sku                 = "Standard_DS1_v2"
+  instances           = 2 # Initial baseline count
+
+  # Prevents Terraform from overwriting changes made by Azure Auto-Scale settings
+  lifecycle {
+    ignore_changes = [
+      instances,
+      tags["LastAutoScaled"]
+    ]
+  }
+}
+
+```
+### 3. How do you pass local script outputs or calculated files into Terraform using the local_file resource?
+ * **Answer:** * You can generate output artifacts (like custom configuration files or environment setup scripts) dynamically and write them to disk using the local_file resource from the local provider.
+ * **Example:** Writing rendered Azure VM boot diagnostics or deployment metadata to a local file:
+```hcl
+resource "local_file" "deployment_summary" {
+  content  = <<EOT
+  Deployment Summary for Azure Environment:
+  VNet ID: ${azurerm_virtual_network.vnet.id}
+  Subnet ID: ${azurerm_subnet.snet.id}
+  Timestamp: ${timestamp()}
+  EOT
+  filename = "${path.module}/outputs/deployment-info.txt"
+}
+
+```
+## Intermediate Level Questions
+### 4. How do you create an Azure Key Vault Private Endpoint and integrate it with an Azure Private DNS Zone using Terraform?
+ * **Answer:** You link an azurerm_private_endpoint to the Key Vault ID, attach it to a designated private subnet, and reference an azurerm_private_dns_zone_group pointing to privatelink.vaultcore.azure.net.
+ * **Example:**
+```hcl
+resource "azurerm_private_dns_zone" "kv_dns" {
+  name                = "privatelink.vaultcore.azure.net"
+  resource_group_name = "rg-networking"
+}
+
+resource "azurerm_private_endpoint" "kv_pe" {
+  name                = "pe-keyvault-prod"
+  location            = "East US"
+  resource_group_name = "rg-security"
+  subnet_id           = "/subscriptions/.../subnets/snet-private-endpoints"
+
+  private_service_connection {
+    name                           = "psc-kv-prod"
+    private_connection_resource_id = azurerm_key_vault.kv.id
+    is_manual_connection           = false
+    subresource_names              = ["vault"]
+  }
+
+  private_dns_zone_group {
+    name                 = "dns-group-kv"
+    private_dns_zone_ids = [azurerm_private_dns_zone.kv_dns.id]
+  }
+}
+
+```
+### 5. How do you enforce custom Tag standards on Azure resources using HCL variable validations?
+ * **Answer:** Define a map variable for resource tags and attach a validation block using HCL functions like contains() or keys() to verify required keys exist before plan execution.
+ * **Example:**
+```hcl
+variable "mandatory_tags" {
+  type = map(string)
+
+  validation {
+    condition     = contains(keys(var.mandatory_tags), "Environment") && contains(keys(var.mandatory_tags), "CostCenter")
+    error_message = "All Azure resources must contain both 'Environment' and 'CostCenter' tag keys."
+  }
+}
+
+```
+### 6. How do you configure Azure Event Grid Subscriptions using Terraform to trigger Azure Functions?
+ * **Answer:** Use azurerm_eventgrid_event_subscription to route system events (such as Blob Storage file creations) directly to an Azure Function or Event Hub endpoint.
+ * **Example:**
+```hcl
+resource "azurerm_eventgrid_event_subscription" "storage_events" {
+  name                  = "evgs-blob-created"
+  scope                 = azurerm_storage_account.st.id
+  included_event_types  = ["Microsoft.Storage.BlobCreated"]
+
+  azure_function_endpoint {
+    function_id = "${azurerm_linux_function_app.func.id}/functions/ProcessBlob"
+  }
+}
+
+```
+### 7. How do you implement Azure User-Assigned Identities with AKS Workload Identity using Terraform?
+ * **Answer:** Enable oidc_issuer_enabled and workload_identity_enabled on the AKS cluster. Create an azurerm_user_assigned_identity and establish a federated identity credential (azurerm_federated_identity_credential) linked to the Kubernetes service account namespace.
+ * **Example:**
+```hcl
+# 1. Enable OIDC & Workload Identity on AKS
+resource "azurerm_kubernetes_cluster" "aks" {
+  name                = "aks-prod"
+  location            = "East US"
+  resource_group_name = "rg-aks"
+  dns_prefix          = "aksprod"
+
+  oidc_issuer_enabled       = true
+  workload_identity_enabled = true
+
+  default_node_pool {
+    name       = "system"
+    node_count = 2
+    vm_size    = "Standard_DS2_v2"
+  }
+  identity { type = "SystemAssigned" }
+}
+
+# 2. Establish Federated Identity Credential
+resource "azurerm_federated_identity_credential" "aks_federated" {
+  name                = "fed-aks-app"
+  resource_group_name = "rg-aks"
+  audience            = ["api://AzureADTokenExchange"]
+  issuer              = azurerm_kubernetes_cluster.aks.oidc_issuer_url
+  subject             = "system:serviceaccount:default:app-service-account"
+  parent_id           = azurerm_user_assigned_identity.app_identity.id
+}
+
+```
+## Advanced Level Questions
+### 8. How do you implement automated multi-region deployment with fallback routing using Azure Front Door in Terraform?
+ * **Answer:** Declare an azurerm_cdn_frontdoor_profile along with an origin group containing primary and secondary region endpoints. Configure health probe settings so Front Door automatically routes traffic to the secondary region if the primary fails.
+ * **Example:**
+```hcl
+# Azure Front Door Origin Group with Failover Health Probe
+resource "azurerm_cdn_frontdoor_origin_group" "og" {
+  name                     = "og-global-web"
+  cdn_frontdoor_profile_id = azurerm_cdn_frontdoor_profile.profile.id
+
+  health_probe {
+    protocol            = "Https"
+    request_type        = "HEAD"
+    probe_method        = "GET"
+    path                = "/health"
+    interval_in_seconds = 15
+  }
+
+  load_balancing {
+    additional_latency_in_milliseconds = 50
+    sample_size                        = 4
+    successful_samples_required        = 2
+  }
+}
+
+# Primary Region Origin (East US)
+resource "azurerm_cdn_frontdoor_origin" "primary" {
+  name                          = "origin-primary-eastus"
+  cdn_frontdoor_origin_group_id = azurerm_cdn_frontdoor_origin_group.og.id
+  enabled                       = true
+  host_name                     = "app-primary-eastus.azurewebsites.net"
+  priority                      = 1 # Primary target
+  weight                        = 1000
+}
+
+# Secondary Region Origin (West US - Failover)
+resource "azurerm_cdn_frontdoor_origin" "secondary" {
+  name                          = "origin-secondary-westus"
+  cdn_frontdoor_origin_group_id = azurerm_cdn_frontdoor_origin_group.og.id
+  enabled                       = true
+  host_name                     = "app-secondary-westus.azurewebsites.net"
+  priority                      = 2 # Secondary fallback
+  weight                        = 1000
+}
+
+```
+### 9. How do you refactor monolithic Terraform code into modules without recreating existing production resources?
+ * **Answer:** * Write the child module code containing the target resources.
+   * Define moved blocks in the root configuration mapping the old standalone resource addresses to their new modular addresses.
+   * Execute terraform plan to confirm that Terraform registers a structural state move rather than a destroy/recreate operation.
+ * **Example:**
+```hcl
+# Standalone definition previously used:
+# resource "azurerm_storage_account" "legacy_st" { ... }
+
+# New Child Module Call:
+module "storage_module" {
+  source               = "./modules/storage"
+  storage_account_name = "stappdataprod001"
+  resource_group_name  = "rg-data"
+}
+
+# Refactoring Directive: Moves state non-destructively
+moved {
+  from = azurerm_storage_account.legacy_st
+  to   = module.storage_module.azurerm_storage_account.this
+}
+
+```
+### 10. How do you execute conditional data fetching using data sources with dynamic parameters in Azure?
+ * **Answer:** Use ternary logic or count inside a data source block to conditionally query Azure resources only when certain conditions are met.
+ * **Example:** Fetching an existing Virtual Network only if an external network ID is provided, otherwise skipping the data lookup:
+```hcl
+variable "existing_vnet_name" {
+  type    = string
+  default = ""
+}
+
+data "azurerm_virtual_network" "vnet_lookup" {
+  count               = var.existing_vnet_name != "" ? 1 : 0
+  name                = var.existing_vnet_name
+  resource_group_name = "rg-shared-networking"
+}
+
+locals {
+  # Resolves ID from Data Source if provided, otherwise defaults to local resource
+  target_vnet_id = var.existing_vnet_name != "" ? data.azurerm_virtual_network.vnet_lookup[0].id : azurerm_virtual_network.local_vnet[0].id
+}
+
+```
+
+
