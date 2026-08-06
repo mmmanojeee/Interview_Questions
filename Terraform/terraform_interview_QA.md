@@ -243,3 +243,197 @@ Here is a **seventh set** of brand-new, unique Terraform interview questions and
        
        ```
      4. Azure automatically manages the creation and lifecycle of the target A record inside the Private DNS Zone matching the allocated private IP.
+
+---
+
+Here is an **eighth set** of unique, real-world Terraform interview questions and answers specifically tailored for Microsoft Azure. To help you prepare thoroughly, each technical concept includes concrete **HCL code examples** and architectural scenarios.
+## Basic Level Questions
+### 1. What is the difference between explicit outputs and the data source in Terraform?
+ * **Answer:** * **Output Values (output):** Expose resource attributes from a Terraform state file so they can be consumed by CLI tools, higher-level root modules, or external automation steps.
+   * **Data Sources (data):** Query the live Azure Resource Manager (ARM) API to fetch properties of resources that already exist in Azure—whether created manually, via Azure Portal, or through a completely different codebase.
+ * **Example:** Fetching an existing Virtual Network's ID using a data block versus exposing a newly created subnet's ID via an output block:
+```hcl
+# Data Source: Reads existing Azure VNet
+data "azurerm_virtual_network" "existing_vnet" {
+  name                = "vnet-core-prod"
+  resource_group_name = "rg-networking-prod"
+}
+
+# Output: Exposes the ID of a newly created subnet
+output "app_subnet_id" {
+  value       = azurerm_subnet.app.id
+  description = "The ID of the newly created App Subnet."
+}
+
+```
+### 2. How do you construct conditional resource creation using the ternary operator in HCL?
+ * **Answer:** You can combine the ternary operator (condition ? true_value : false_value) with the count meta-argument. If the boolean condition evaluates to true, count is set to 1 (creating the resource); otherwise, count is set to 0 (skipping creation).
+ * **Example:** Conditionally creating an Azure Public IP based on an input variable:
+```hcl
+variable "enable_public_ip" {
+  type    = bool
+  default = false
+}
+
+resource "azurerm_public_ip" "pip" {
+  count               = var.enable_public_ip ? 1 : 0
+  name                = "pip-app-prod"
+  resource_group_name = "rg-app"
+  location            = "East US"
+  allocation_method   = "Static"
+  sku                 = "Standard"
+}
+
+```
+## Intermediate Level Questions
+### 3. How do you implement Zero-Downtime deployment for an Azure Virtual Machine or Scale Set using lifecycle rules?
+ * **Answer:** By default, if an attribute change forces a resource recreation in Azure (such as changing an OS image SKU or network configuration), Terraform destroys the old resource *before* creating the replacement. Applying create_before_destroy = true forces Terraform to provision the new Azure resource first, verify its creation, and then destroy the old one.
+ * **Example:** Protecting an Azure Network Interface from downtime during updates:
+```hcl
+resource "azurerm_network_interface" "nic" {
+  name                = "nic-web-prod"
+  location            = "East US"
+  resource_group_name = "rg-web"
+
+  ip_configuration {
+    name                          = "internal"
+    subnet_id                     = "/subscriptions/.../subnets/snet-web"
+    private_ip_address_allocation = "Dynamic"
+  }
+
+  lifecycle {
+    create_before_destroy = true
+  }
+}
+
+```
+### 4. How do you assign an Azure User-Assigned Managed Identity to an App Service and grant it Access Key permissions on Key Vault?
+ * **Answer:** You must link three components in sequence:
+   1. Define the User-Assigned Identity (azurerm_user_assigned_identity).
+   2. Assign the identity to the Azure App Service via the identity configuration block.
+   3. Create an Azure RBAC Role Assignment (azurerm_role_assignment) granting the identity "Key Vault Secrets User" rights.
+ * **Example:**
+```hcl
+# 1. Create User-Assigned Identity
+resource "azurerm_user_assigned_identity" "app_id" {
+  name                = "id-webapp-prod"
+  location            = "East US"
+  resource_group_name = "rg-app"
+}
+
+# 2. Attach Identity to App Service
+resource "azurerm_linux_web_app" "app" {
+  name                = "app-orderservice-prod"
+  location            = "East US"
+  resource_group_name = "rg-app"
+  service_plan_id     = "/subscriptions/.../appServicePlans/plan-prod"
+
+  identity {
+    type         = "UserAssigned"
+    identity_ids = [azurerm_user_assigned_identity.app_id.id]
+  }
+
+  site_config {}
+}
+
+# 3. Assign Key Vault Secrets User Role
+resource "azurerm_role_assignment" "kv_read" {
+  scope                = "/subscriptions/.../resourceGroups/rg-sec/providers/Microsoft.KeyVault/vaults/kv-prod"
+  role_definition_name = "Key Vault Secrets User"
+  principal_id         = azurerm_user_assigned_identity.app_id.principal_id
+}
+
+```
+### 5. How do you configure an Azure Storage Account with Network Rules to restrict access strictly to specific Subnets?
+ * **Answer:** You use the network_rules sub-block inside azurerm_storage_account. You set default_action = "Deny" and supply authorized subnet IDs via virtual_network_subnet_ids. The target subnets must have the Microsoft.Storage Service Endpoint or Private Endpoint enabled.
+ * **Example:**
+```hcl
+resource "azurerm_storage_account" "secure_st" {
+  name                     = "stsecureappprod"
+  resource_group_name      = "rg-data"
+  location                 = "East US"
+  account_tier             = "Standard"
+  account_replication_type = "LRS"
+
+  network_rules {
+    default_action             = "Deny"
+    bypass                     = ["AzureServices"]
+    virtual_network_subnet_ids = ["/subscriptions/.../subnets/snet-app"]
+    ip_rules                   = ["203.0.113.10"] # Trusted Office IP
+  }
+}
+
+```
+## Advanced Level Questions
+### 6. How do you safely move an existing Azure resource into a Child Module using the moved block without destroying it?
+ * **Answer:** Prior to Terraform 1.1, moving a resource into a module required manually modifying state with terraform state mv. With moved blocks, you declare the structural refactoring directly in HCL code. When terraform plan runs, it detects the address shift and updates the state file non-destructively.
+ * **Example:** Moving a Storage Account into a reusable module:
+```hcl
+# Before refactoring: azurerm_storage_account.app_storage
+# After refactoring: module.storage.azurerm_storage_account.this
+
+moved {
+  from = azurerm_storage_account.app_storage
+  to   = module.storage.azurerm_storage_account.this
+}
+
+```
+### 7. How do you construct complex nested inputs using for expressions to dynamically map Azure Subnets and Route Tables?
+ * **Answer:** In enterprise hub-and-spoke models, subnets are often defined as a map of objects. You can iterate over this map using for_each and extract calculated properties dynamically.
+ * **Example:** Constructing multiple Azure Subnets dynamically from a complex local variable map:
+```hcl
+locals {
+  subnets = {
+    "snet-web" = { cidr = "10.0.1.0/24", delegate = false }
+    "snet-app" = { cidr = "10.0.2.0/24", delegate = false }
+    "snet-aci" = { cidr = "10.0.3.0/24", delegate = true  }
+  }
+}
+
+resource "azurerm_subnet" "subnets" {
+  for_each             = locals.subnets
+  name                 = each.key
+  resource_group_name  = "rg-networking"
+  virtual_network_name = "vnet-prod"
+  address_prefixes     = [each.value.cidr]
+
+  dynamic "delegation" {
+    for_each = each.value.delegate ? [1] : []
+    content {
+      name = "aci-delegation"
+      service_delegation {
+        name    = "Microsoft.ContainerInstance/containerGroups"
+        actions = ["Microsoft.Network/virtualNetworks/subnets/action"]
+      }
+    }
+  }
+}
+
+```
+### 8. How do you prevent sensitive outputs from leaking into Terraform state files and CI/CD logs when generating Azure VM admin passwords?
+ * **Answer:** 1. Generate the random password using the random_password provider resource.
+   2. Mark input variables or output definitions containing secrets as sensitive = true.
+   3. Pass the generated password directly to the Azure VM resource or store it in Azure Key Vault without echoing it to console outputs.
+ * **Example:**
+```hcl
+# Generate secure password
+resource "random_password" "vm_password" {
+  length           = 16
+  special          = true
+  override_special = "!#$%&*()-_=+[]{}<>:?"
+}
+
+# Store directly in Azure Key Vault
+resource "azurerm_key_vault_secret" "vm_secret" {
+  name         = "vm-admin-password"
+  value        = random_password.vm_password.result
+  key_vault_id = "/subscriptions/.../vaults/kv-prod"
+}
+
+# Expose output while hiding value from CLI logs
+output "kv_secret_uri" {
+  value       = azurerm_key_vault_secret.vm_secret.versionless_id
+  sensitive   = true # Suppresses output in terminal logs
+}
+
+```
