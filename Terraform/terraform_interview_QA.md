@@ -1680,3 +1680,239 @@ resource "azapi_resource" "preview_feature" {
 }
 
 ```
+
+---
+
+Here is a **fourteenth set** of 10 scenario-focused Terraform and Microsoft Azure interview questions complete with practical HCL code examples.
+## Basic Level Questions
+### 1. How do you execute post-provisioning scripts inside an Azure Virtual Machine without using local-exec provisioners?
+ * **Answer:** Instead of using Terraform provisioners (which bypass state tracking), use the azurerm_virtual_machine_extension resource to invoke the **Custom Script Extension** natively through Azure Resource Manager.
+ * **Example:**
+```hcl
+resource "azurerm_virtual_machine_extension" "custom_script" {
+  name                 = "vm-bootstrap-script"
+  virtual_machine_id   = azurerm_linux_virtual_machine.vm.id
+  publisher            = "Microsoft.Azure.Extensions"
+  type                 = "CustomScript"
+  type_handler_version = "2.1"
+
+  settings = <<SETTINGS
+    {
+        "commandToExecute": "echo 'Bootstrap complete' > /tmp/init.log"
+    }
+SETTINGS
+}
+
+```
+### 2. How do you enforce Immutability (WORM policy) on an Azure Storage Container using Terraform?
+ * **Answer:** Configure azurerm_storage_container_immutability_policy to block modification or deletion of blobs within a container for a specified retention period.
+ * **Example:**
+```hcl
+resource "azurerm_storage_container" "audit_logs" {
+  name                  = "audit-compliance-logs"
+  storage_account_name  = azurerm_storage_account.st.name
+  container_access_type = "private"
+}
+
+resource "azurerm_storage_container_immutability_policy" "worm_policy" {
+  storage_container_resource_manager_id = azurerm_storage_container.audit_logs.resource_manager_id
+  immutability_period_in_days            = 365
+  protected_append_blobs_automated_policy_enabled = true
+}
+
+```
+### 3. How do you look up regional location display names dynamically using Azure data sources?
+ * **Answer:** Use the azurerm_location data source to fetch metadata for a region (such as display names or pairing regions) without hardcoding regional strings.
+ * **Example:**
+```hcl
+data "azurerm_location" "eastus" {
+  location = "eastus"
+}
+
+output "location_display_name" {
+  value = data.azurerm_location.eastus.display_name # Outputs "East US"
+}
+
+output "paired_location" {
+  value = data.azurerm_location.eastus.paired_location # Outputs "westus"
+}
+
+```
+## Intermediate Level Questions
+### 4. How do you configure Azure Application Insights linked to a central Log Analytics Workspace using Terraform?
+ * **Answer:** Declare an azurerm_log_analytics_workspace and link it to azurerm_application_insights using the workspace_id property.
+ * **Example:**
+```hcl
+resource "azurerm_log_analytics_workspace" "law" {
+  name                = "law-central-prod"
+  location            = "East US"
+  resource_group_name = "rg-ops"
+  sku                 = "PerGB2018"
+}
+
+resource "azurerm_application_insights" "app_insights" {
+  name                = "appi-orderservice-prod"
+  location            = "East US"
+  resource_group_name = "rg-ops"
+  workspace_id        = azurerm_log_analytics_workspace.law.id
+  application_type    = "web"
+}
+
+```
+### 5. How do you attach an Azure NAT Gateway to multiple subnets for outbound IP egress control using Terraform?
+ * **Answer:** Create an azurerm_nat_gateway, associate a Static Public IP (azurerm_public_ip), and link target subnets using azurerm_subnet_nat_gateway_association.
+ * **Example:**
+```hcl
+resource "azurerm_nat_gateway" "nat" {
+  name                = "nat-gw-prod"
+  location            = "East US"
+  resource_group_name = "rg-networking"
+  sku_name            = "Standard"
+}
+
+resource "azurerm_subnet_nat_gateway_association" "assoc_app" {
+  subnet_id      = "/subscriptions/.../subnets/snet-app"
+  nat_gateway_id = azurerm_nat_gateway.nat.id
+}
+
+```
+### 6. How do you provision an Azure Cosmos DB SQL Database with Autoscale settings using Terraform?
+ * **Answer:** Define an azurerm_cosmosdb_account and create an azurerm_cosmosdb_sql_database configured with an autoscale_settings block.
+ * **Example:**
+```hcl
+resource "azurerm_cosmosdb_account" "cosmos" {
+  name                = "cosmos-orders-prod"
+  location            = "East US"
+  resource_group_name = "rg-data"
+  offer_type          = "Standard"
+  kind                = "GlobalDocumentDB"
+
+  consistency_policy {
+    consistency_level = "Session"
+  }
+
+  geo_location {
+    location          = "East US"
+    failover_priority = 0
+  }
+}
+
+resource "azurerm_cosmosdb_sql_database" "db" {
+  name                = "sqldb-orders"
+  resource_group_name = azurerm_cosmosdb_account.cosmos.resource_group_name
+  account_name        = azurerm_cosmosdb_account.cosmos.name
+
+  autoscale_settings {
+    max_throughput = 4000 # Scales dynamically between 400 RU/s and 4000 RU/s
+  }
+}
+
+```
+### 7. How do you link a single Azure Private DNS Zone across multiple Virtual Networks using for_each?
+ * **Answer:** Maintain a map or list of VNet IDs and iterate using for_each inside azurerm_private_dns_zone_virtual_network_link.
+ * **Example:**
+```hcl
+variable "vnet_ids" {
+  type = map(string)
+  default = {
+    "hub"   = "/subscriptions/.../virtualNetworks/vnet-hub"
+    "spoke" = "/subscriptions/.../virtualNetworks/vnet-spoke-app"
+  }
+}
+
+resource "azurerm_private_dns_zone" "dns" {
+  name                = "privatelink.database.windows.net"
+  resource_group_name = "rg-networking"
+}
+
+resource "azurerm_private_dns_zone_virtual_network_link" "links" {
+  for_each              = var.vnet_ids
+  name                  = "link-${each.key}"
+  resource_group_name   = azurerm_private_dns_zone.dns.resource_group_name
+  private_dns_zone_name = azurerm_private_dns_zone.dns.name
+  virtual_network_id    = each.value
+}
+
+```
+## Advanced Level Questions
+### 8. How do you create Custom Azure Policy Definitions and trigger Policy Remediation Tasks via Terraform?
+ * **Answer:** Define custom governance rules using azurerm_policy_definition, assign them via azurerm_resource_group_policy_assignment, and trigger automatic remediation of existing non-compliant resources using azurerm_resource_group_policy_remediation.
+ * **Example:**
+```hcl
+# 1. Custom Policy Definition
+resource "azurerm_policy_definition" "enforce_https" {
+  name         = "enforce-storage-https"
+  policy_type  = "Custom"
+  mode         = "Indexed"
+  display_name = "Enforce HTTPS for Storage Accounts"
+
+  policy_rule = jsonencode({
+    if = {
+      field  = "type"
+      equals = "Microsoft.Storage/storageAccounts"
+    }
+    then = {
+      effect = "Modify"
+      details = {
+        roleDefinitionIds = ["/providers/Microsoft.Authorization/roleDefinitions/17d101d3-bc11-4c22-b94e-af69f357809b"]
+        operations = [
+          {
+            operation = "addOrReplace"
+            field     = "Microsoft.Storage/storageAccounts/supportsHttpsTrafficOnly"
+            value     = true
+          }
+        ]
+      }
+    }
+  })
+}
+
+# 2. Policy Remediation Task
+resource "azurerm_resource_group_policy_remediation" "remediate_storage" {
+  name                 = "remediate-storage-https"
+  resource_group_id    = "/subscriptions/.../resourceGroups/rg-data"
+  policy_assignment_id = azurerm_resource_group_policy_assignment.assign.id
+}
+
+```
+### 9. How do you implement Ephemeral Variables or Write-Only Values to prevent secrets from being stored in Terraform State?
+ * **Answer:** Modern Terraform features support write-only inputs or ephemeral resources that process credentials during execution without recording raw secret strings inside the JSON state file.
+ * **Example:** Defining ephemeral parameters in modern HCL:
+```hcl
+# Input variable marked as ephemeral (Terraform 1.10+)
+variable "database_password" {
+  type      = string
+  ephemeral = true # Prevents value from being persisted to state file
+}
+
+resource "azurerm_key_vault_secret" "db_secret" {
+  name         = "sql-admin-pass"
+  value        = var.database_password
+  key_vault_id = "/subscriptions/.../vaults/kv-prod"
+}
+
+```
+### 10. How do you configure Disaster Recovery VM Replication using Azure Site Recovery (ASR) in Terraform?
+ * **Answer:** Configure azurerm_site_recovery_fabric in primary and secondary regions, set up an azurerm_site_recovery_protection_container, and initiate disk replication via azurerm_site_recovery_replicated_vm.
+ * **Example:**
+```hcl
+resource "azurerm_site_recovery_replicated_vm" "vm_replication" {
+  name                                      = "asr-vm-replication"
+  resource_group_name                       = "rg-recovery-vault"
+  recovery_vault_name                       = azurerm_recovery_services_vault.vault.name
+  source_recovery_fabric_name               = "primary-fabric-eastus"
+  source_vm_id                              = azurerm_linux_virtual_machine.primary_vm.id
+  target_recovery_fabric_id                 = azurerm_site_recovery_fabric.secondary.id
+  target_resource_group_id                  = "/subscriptions/.../resourceGroups/rg-dr-westus"
+  target_zone                               = "1"
+
+  managed_disk {
+    disk_id                    = azurerm_linux_virtual_machine.primary_vm.os_disk[0].managed_disk_id
+    staging_storage_account_id = azurerm_storage_account.asr_cache.id
+    target_resource_group_id   = "/subscriptions/.../resourceGroups/rg-dr-westus"
+    target_disk_type           = "Premium_LRS"
+    target_replica_disk_type   = "Premium_LRS"
+  }
+}
+
+```
