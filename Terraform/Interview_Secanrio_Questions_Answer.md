@@ -1535,3 +1535,81 @@ run "verify_subnet_address_prefix" {
      * Update Key Vault secrets (azurerm_key_vault_secret) while using lifecycle { create_before_destroy = true }.
      * Leverage Azure Key Vault Event Grid notifications connected to App Service deployment slots or AKS secret provider daemons (CSI driver) to automatically pull updated secrets into running pods without restarting the cluster.
 
+---
+
+Here is a **sixth set** of brand-new, unique Terraform interview questions and answers focused exclusively on Microsoft Azure scenarios. None of these questions repeat topics from previous sets.
+## Basic Level Questions
+### 1. What is the difference between terraform state push and terraform state pull?
+ * **Answer:**
+   * **terraform state pull:** Retrieves the current state file directly from the remote backend (e.g., Azure Blob Storage) and outputs it to standard output (stdout). It is useful for inspecting raw state JSON locally or performing offline debugging.
+   * **terraform state push:** Overwrites the remote state file with a local file.
+   * **Caution:** state push bypasses standard safety checks and state locking. It should be used sparingly during manual emergency recovery scenarios (e.g., restoring state after a corrupted pipeline step).
+### 2. How do terraform.tfvars and *.auto.tfvars files behave when both are present in an Azure project?
+ * **Answer:**
+   * Both file types automatically supply values for declared input variables without needing the -var-file command-line flag.
+   * **Precedence Order:** *.auto.tfvars files take precedence over standard terraform.tfvars files.
+   * **Execution Strategy:** If identical variable definitions exist in both, the value inside *.auto.tfvars will override the value in terraform.tfvars.
+### 3. What is the difference between the azurerm provider and the azuread provider in Terraform?
+ * **Answer:**
+   * **azurerm Provider:** Used to manage Azure infrastructure resources governed by Azure Resource Manager (ARM)—such as Virtual Networks, Storage Accounts, Key Vaults, and Virtual Machines.
+   * **azuread Provider:** Used to manage Microsoft Entra ID (formerly Azure Active Directory) objects—such as Entra Users, Groups, Service Principals, Application Registrations, and Enterprise Applications.
+   * **Usage:** They are often paired together when provisioning an Azure Kubernetes Service (AKS) cluster that requires associated Entra ID security groups and service principals.
+## Intermediate Level Questions
+### 4. How do you manage Azure Resource Group-level vs. Subscription-level deployments in Terraform?
+ * **Answer:**
+   * By default, the azurerm provider deploys resources into a specific Resource Group scope.
+   * To manage subscription-scoped resources (e.g., azurerm_subscription_cost_management_export or enterprise Azure Policy Assignments), omit the resource_group_name property from the configuration or define subscription targets directly.
+   * **Example Configuration for Subscription Scope:**
+```hcl
+resource "azurerm_policy_assignment" "audit_vms" {
+  name                 = "audit-vm-policy"
+  scope                = "/subscriptions/00000000-0000-0000-0000-000000000000"
+  policy_definition_id = "/providers/Microsoft.Authorization/policyDefinitions/..."
+  description          = "Audits virtual machines without specific tags across the subscription."
+}
+
+```
+### 5. How do you handle Azure API Rate Limiting / Throttling (HTTP 429 errors) during large Terraform deployments?
+ * **Answer:**
+   * **Cause:** Running terraform apply across hundreds of Azure resources sends parallel REST API requests to Azure Resource Manager (ARM). ARM enforces rate limits per client ID/subscription per hour.
+   * **Mitigation Strategies:**
+     1. **Reduce Parallelism:** Use the -parallelism flag to throttle concurrent requests (e.g., terraform apply -parallelism=5).
+     2. **Exponential Backoff:** Configure provider retry properties inside provider "azurerm" blocks to allow automatic retries upon receiving HTTP 429 status codes.
+     3. **State File Splitting:** Refactor monolithic configurations into modular deployments so individual pipeline runs issue fewer API calls.
+### 6. What are Terraform Checks (check blocks), and how do they differ from precondition and postcondition in Azure configurations?
+ * **Answer:**
+   * **precondition / postcondition:** Attached directly to resource lifecycle blocks. If an assertion fails, Terraform halts execution immediately and prevents downstream resources from provisioning.
+   * **check Block:** Introduced in Terraform 1.5, check blocks execute continuous, non-blocking health checks against infrastructure without interrupting ongoing plan or apply steps.
+   * **Azure Example:** Verifying if an Azure Web App endpoint returns a 200 OK status post-deployment:
+```hcl
+check "health_check" {
+  data "http" "webapp_status" {
+    url = "https://${azurerm_linux_web_app.app.default_hostname}/health"
+  }
+
+  assert {
+    condition     = data.http.webapp_status.status_code == 200
+    error_message = "Azure Web App health endpoint returned non-200 status code."
+  }
+}
+
+```
+## Advanced Level Questions
+### 7. How do you maintain Terraform State security and compliance in Azure under strict zero-trust enterprise requirements?
+ * **Answer:**
+   * **Data-at-Rest Encryption:** Encrypt the state file in Azure Blob Storage using **Customer-Managed Keys (CMK)** stored inside Azure Key Vault with Key Vault Auto-Rotation enabled.
+   * **Network Isolation:** Disable public access on the Storage Account hosting the state file; allow access only via **Private Endpoints** attached to dedicated build agent VNets.
+   * **RBAC & Governance:** Grant minimum permissions using Azure RBAC (e.g., Storage Blob Data Contributor to the deployment Service Principal, suppressing key access via shared_access_key_enabled = false).
+   * **State Sanitization:** Prevent sensitive output leaks by setting sensitive = true on output attributes and stripping sensitive secrets out of version control.
+### 8. How do you implement automated disaster recovery (DR) for Terraform State stored in Azure Blob Storage?
+ * **Answer:**
+   * **Blob Versioning:** Enable Blob Versioning on the Azure Storage Container. If state is corrupted, you can revert back to an earlier blob version instantly without loss of managed state pointers.
+   * **Soft Delete:** Enable Container and Blob Soft Delete (e.g., 30-day retention) to protect against accidental manual or programmatic deletion.
+   * **Geo-Replication:** Configure the Storage Account to use **Geo-Redundant Storage (GRS)** or **Read-Access Geo-Redundant Storage (RA-GRS)** to asynchronously replicate the state file to a paired Azure region in case of datacenter disasters.
+### 9. How do you resolve state sync issues when Azure resources are modified outside of Terraform (e.g., via Azure Portal or Azure CLI)?
+ * **Answer:**
+   1. **Identify Drift:** Execute terraform plan to compare actual Azure infrastructure attributes against state definitions.
+   2. **Option A (Revert Manual Changes):** Run terraform apply to overwrite portal changes and align cloud infrastructure back to defined HCL code.
+   3. **Option B (Accept Drift into Code):** Update the local .tf files to match the updated properties from Azure, then run terraform apply -refresh-only to sync state without making cloud alterations.
+   4. **Option C (Ignore Fluctations):** Use lifecycle { ignore_changes = [ tags, properties... ] } for properties modified dynamically by Azure auto-scalers or automated policy engines.
+
