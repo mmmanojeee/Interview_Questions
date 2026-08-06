@@ -2167,3 +2167,231 @@ resource "azurerm_linux_web_app" "app" {
 
 ```
 Would you like to explore any specific Azure domain in more detail, such as **AKS / Containers**, **Enterprise Governance & Policies**, or **Hub-and-Spoke Networking**?
+
+---
+
+Here is a **sixteenth set** of 10 scenario-focused Terraform and Microsoft Azure interview questions and answers, complete with practical HCL code examples.
+## Basic Level Questions
+### 1. What is the difference between terraform taint (deprecated) and terraform apply -replace?
+ * **Answer:**
+   * **terraform taint (Legacy):** Interactively marked a resource as degraded directly inside the state file. On the next execution, Terraform would destroy and recreate that specific resource.
+   * **terraform apply -replace (Modern Standard):** Instructs Terraform to force-replace a specific resource during a single execution run *without* permanently mutating the state file beforehand.
+ * **Example:**
+   ```bash
+   # Force recreation of a specific Azure Virtual Machine during apply
+   terraform apply -replace="azurerm_linux_virtual_machine.app_vm"
+   
+   ```
+### 2. How do you reference an Azure Managed Disk's ID when attaching it to an existing VM?
+ * **Answer:** Define the disk using azurerm_managed_disk and link it to the VM using the dedicated azurerm_virtual_machine_data_disk_attachment resource. This prevents inline disk configuration changes from forcing the recreation of the underlying Virtual Machine.
+ * **Example:**
+   ```hcl
+   resource "azurerm_managed_disk" "data_disk" {
+     name                 = "disk-data-prod"
+     location             = "East US"
+     resource_group_name  = "rg-compute"
+     storage_account_type = "Premium_LRS"
+     create_option        = "Empty"
+     disk_size_gb         = 128
+   }
+   
+   resource "azurerm_virtual_machine_data_disk_attachment" "disk_attach" {
+     managed_disk_id    = azurerm_managed_disk.data_disk.id
+     virtual_machine_id = azurerm_linux_virtual_machine.vm.id
+     lun                = "10"
+     caching            = "ReadWrite"
+   }
+   
+   ```
+### 3. How do you use the can() function in local variables for safe attribute validation?
+ * **Answer:** The can() function evaluates an expression and returns true if no errors occur, and false if an error (like a missing key or null reference) is raised. It is commonly used in locals or input validations to handle optional nested properties cleanly.
+ * **Example:**
+   ```hcl
+   variable "vnet_config" {
+     type    = any
+     default = { address_space = ["10.0.0.0/16"] }
+   }
+   
+   locals {
+     # Validates if custom DNS servers were provided without throwing a runtime error
+     has_custom_dns = can(var.vnet_config.dns_servers[0])
+   }
+   
+   ```
+## Intermediate Level Questions
+### 4. How do you deploy an Azure Function App with a Managed Identity and Key Vault reference in its App Settings?
+ * **Answer:** Create an azurerm_linux_function_app with a System-Assigned Managed Identity enabled. Grant that identity access to Key Vault secrets via RBAC (Key Vault Secrets User). Then, use the native @Microsoft.KeyVault(...) syntax inside app_settings.
+ * **Example:**
+   ```hcl
+   resource "azurerm_linux_function_app" "func" {
+     name                = "func-processor-prod"
+     resource_group_name = "rg-apps"
+     location            = "East US"
+     service_plan_id     = azurerm_service_plan.plan.id
+   
+     storage_account_name       = azurerm_storage_account.st.name
+     storage_account_access_key = azurerm_storage_account.st.primary_access_key
+   
+     identity {
+       type = "SystemAssigned"
+     }
+   
+     app_settings = {
+       # App pulls secret directly from Key Vault at runtime
+       "DbConnectionString" = "@Microsoft.KeyVault(SecretUri=https://kv-prod.vault.azure.net/secrets/db-conn/)"
+     }
+   }
+   
+   ```
+### 5. How do you configure Azure Service Bus Topics and Subscriptions with dynamic Filters using Terraform?
+ * **Answer:** Provision an azurerm_servicebus_topic, create an azurerm_servicebus_subscription, and attach custom SQL or Correlation filtering rules via azurerm_servicebus_subscription_rule.
+ * **Example:**
+   ```hcl
+   resource "azurerm_servicebus_topic" "orders" {
+     name         = "sbt-orders-events"
+     namespace_id = azurerm_servicebus_namespace.sb.id
+   }
+   
+   resource "azurerm_servicebus_subscription" "sub_priority" {
+     name               = "sub-priority-orders"
+     topic_id           = azurerm_servicebus_topic.orders.id
+     max_delivery_count = 10
+   }
+   
+   resource "azurerm_servicebus_subscription_rule" "rule_priority" {
+     name            = "rule-high-priority"
+     subscription_id = azurerm_servicebus_subscription.sub_priority.id
+     filter_type     = "SqlFilter"
+     sql_filter      = "User.Priority = 'High'"
+   }
+   
+   ```
+### 6. How do you enforce Private Endpoint deployments for Azure SQL Database using Terraform?
+ * **Answer:** Set public_network_access_enabled = false on azurerm_mssql_server to disable public connectivity. Then, bind an azurerm_private_endpoint targeting the sqlServer subresource to a private subnet.
+ * **Example:**
+   ```hcl
+   resource "azurerm_mssql_server" "sql" {
+     name                         = "sql-orders-prod"
+     resource_group_name          = "rg-data"
+     location                     = "East US"
+     version                      = "12.0"
+     administrator_login          = "sqladmin"
+     administrator_login_password = "ComplexPassword123!"
+   
+     public_network_access_enabled = false # Blocks all public access
+   }
+   
+   resource "azurerm_private_endpoint" "sql_pe" {
+     name                = "pe-sql-prod"
+     location            = "East US"
+     resource_group_name = "rg-data"
+     subnet_id           = "/subscriptions/.../subnets/snet-private"
+   
+     private_service_connection {
+       name                           = "psc-sql-prod"
+       private_connection_resource_id = azurerm_mssql_server.sql.id
+       is_manual_connection           = false
+       subresource_names              = ["sqlServer"]
+     }
+   }
+   
+   ```
+### 7. How do you write cross-field validation rules using precondition blocks inside a Resource block?
+ * **Answer:** Use a precondition block inside the resource's lifecycle block. This allows you to evaluate expressions that compare multiple variables or resource parameters before Terraform sends API execution calls to Azure.
+ * **Example:**
+   ```hcl
+   variable "sku_tier" { default = "Premium" }
+   variable "enable_zone_redundancy" { default = true }
+   
+   resource "azurerm_service_plan" "asp" {
+     name                = "asp-web-prod"
+     resource_group_name = "rg-web"
+     location            = "East US"
+     os_type             = "Linux"
+     sku_name            = "P1v2"
+   
+     lifecycle {
+       precondition {
+         condition     = var.enable_zone_redundancy == false || var.sku_tier == "Premium"
+         error_message = "Zone Redundancy can only be enabled when sku_tier is set to 'Premium'."
+       }
+     }
+   }
+   
+   ```
+## Advanced Level Questions
+### 8. How do you structure an Enterprise Hub-and-Spoke Network Architecture with Azure Firewall routing in Terraform?
+ * **Answer:**
+   1. Build the Hub VNet containing AzureFirewallSubnet and deploy azurerm_firewall.
+   2. Build Spoke VNets and create two-way VNet Peerings (azurerm_virtual_network_peering) between Hub and Spokes.
+   3. Create an azurerm_route_table with a 0.0.0.0/0 default route pointing to the Azure Firewall's private IP as the next hop (VirtualAppliance).
+   4. Associate the Route Table with all Spoke Subnets.
+ * **Example:**
+   ```hcl
+   resource "azurerm_route_table" "spoke_rt" {
+     name                = "rt-spoke-to-firewall"
+     location            = "East US"
+     resource_group_name = "rg-hub-networking"
+   
+     route {
+       name                   = "default-to-firewall"
+       address_prefix         = "0.0.0.0/0"
+       next_hop_type          = "VirtualAppliance"
+       next_hop_in_ip_address = azurerm_firewall.fw.ip_configuration[0].private_ip_address
+     }
+   }
+   
+   resource "azurerm_subnet_route_table_association" "spoke_assoc" {
+     subnet_id      = azurerm_subnet.spoke_app_subnet.id
+     route_table_id = azurerm_route_table.spoke_rt.id
+   }
+   
+   ```
+### 9. How do you implement Zero-Downtime Blue/Green deployments for Azure Virtual Machine Scale Sets (VMSS) using custom capacity rolling updates?
+ * **Answer:** Configure azurerm_linux_virtual_machine_scale_set with an upgrade_mode = "Rolling" policy and couple it with rolling_upgrade_policy settings. Use lifecycle { create_before_destroy = true } on dependent load balancer configurations to prevent traffic drops during updates.
+ * **Example:**
+   ```hcl
+   resource "azurerm_linux_virtual_machine_scale_set" "vmss" {
+     name                = "vmss-web-prod"
+     resource_group_name = "rg-compute"
+     location            = "East US"
+     sku                 = "Standard_D2s_v3"
+     instances           = 3
+     upgrade_mode        = "Rolling"
+   
+     rolling_upgrade_policy {
+       max_batch_instance_percent              = 20
+       max_unhealthy_instance_percent          = 20
+       max_unhealthy_upgraded_instance_percent = 5
+       pause_time_between_batches              = "PT0S"
+     }
+   
+     # ... Network and OS Profile configurations ...
+   }
+   
+   ```
+### 10. How do you configure Terraform OIDC Federated Authentication for GitHub Actions without using long-lived Azure Client Secrets?
+ * **Answer:**
+   1. Create a User-Assigned Identity or Entra App Registration.
+   2. Create an azurerm_federated_identity_credential linking the GitHub repository, environment, or pull-request subject claim to the Azure identity.
+   3. Configure the azurerm provider block to use use_oidc = true.
+   4. In the GitHub Actions workflow, pass client-id, tenant-id, and subscription-id via the azure/login action using short-lived tokens.
+ * **Example:**
+   ```hcl
+   resource "azurerm_user_assigned_identity" "github_oidc" {
+     name                = "id-github-actions-prod"
+     location            = "East US"
+     resource_group_name = "rg-sec"
+   }
+   
+   resource "azurerm_federated_identity_credential" "github_federated" {
+     name                = "fed-github-main-branch"
+     resource_group_name = "rg-sec"
+     audience            = ["api://AzureADTokenExchange"]
+     issuer              = "https://token.actions.githubusercontent.com"
+     subject             = "repo:my-org/my-repo:ref:refs/heads/main"
+     parent_id           = azurerm_user_assigned_identity.github_oidc.id
+   }
+   
+   ```
+
