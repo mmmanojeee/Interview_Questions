@@ -1120,4 +1120,302 @@ locals {
 
 ```
 
+---
+
+Here is a **twelfth set** of 10 scenario-based Terraform and Azure interview questions with HCL code examples.
+## Basic Level Questions
+### 1. What is the difference between terraform destroy and setting count = 0 on an Azure resource block?
+ * **Answer:**
+   * **terraform destroy:** Destroys **all** infrastructure managed by the state file.
+   * **count = 0:** Removes only the **specific resource block** assigned count = 0 during the next terraform apply, while leaving all other state-managed Azure resources completely untouched.
+ * **Example:**
+```hcl
+variable "deploy_bastion" {
+  type    = bool
+  default = false # Set to false to remove Bastion without destroying the VNet
+}
+
+resource "azurerm_bastion_host" "bastion" {
+  count               = var.deploy_bastion ? 1 : 0
+  name                = "bas-shared-prod"
+  location            = "East US"
+  resource_group_name = "rg-networking"
+
+  ip_configuration {
+    name                 = "bastion-ip-config"
+    subnet_id            = "/subscriptions/.../subnets/AzureBastionSubnet"
+    public_ip_address_id = "/subscriptions/.../publicIPAddresses/pip-bastion"
+  }
+}
+
+```
+### 2. How do you convert complex object outputs into localized JSON files using jsonencode() in HCL?
+ * **Answer:** When external deployment scripts require output parameters (such as database endpoints or subnet IDs), you can format local expressions or outputs into structured JSON strings using jsonencode().
+ * **Example:**
+```hcl
+locals {
+  app_config = {
+    environment = "production"
+    database = {
+      server_fqdn = "sql-app-prod.database.windows.net"
+      db_name     = "sqldb-orders"
+    }
+    features_enabled = ["logging", "auto-scaling", "cdn"]
+  }
+}
+
+resource "local_file" "app_settings" {
+  content  = jsonencode(locals.app_config)
+  filename = "${path.module}/appsettings.json"
+}
+
+```
+### 3. How do you handle string case formatting and transformations in Azure naming tags?
+ * **Answer:** Azure resource properties (like Storage Accounts) enforce strict lowercase alphanumeric constraints. You can use native HCL string functions like lower(), replace(), and substr() inside local variables to sanitize inputs automatically.
+ * **Example:**
+```hcl
+variable "raw_project_name" {
+  type    = string
+  default = "My_Project-App 01"
+}
+
+locals {
+  # Converts "My_Project-App 01" -> "myprojectapp01"
+  clean_storage_name = lower(replace(replace(var.raw_project_name, "_", ""), "-", ""))
+}
+
+resource "azurerm_storage_account" "st" {
+  name                     = "st${locals.clean_storage_name}"
+  resource_group_name      = "rg-storage"
+  location                 = "East US"
+  account_tier             = "Standard"
+  account_replication_type = "LRS"
+}
+
+```
+## Intermediate Level Questions
+### 4. How do you attach a Network Security Group (NSG) to an Azure Subnet using the modern dedicated association resource?
+ * **Answer:** In current versions of the azurerm provider, embedding security rules directly inside the azurerm_subnet resource is discouraged because it can cause state conflicts. Instead, create an independent azurerm_network_security_group and link it to the subnet using azurerm_subnet_network_security_group_association.
+ * **Example:**
+```hcl
+resource "azurerm_network_security_group" "nsg" {
+  name                = "nsg-app-prod"
+  location            = "East US"
+  resource_group_name = "rg-networking"
+
+  security_rule {
+    name                       = "AllowHTTPS"
+    priority                   = 100
+    direction                  = "Inbound"
+    access                     = "Allow"
+    protocol                   = "Tcp"
+    source_port_range          = "*"
+    destination_port_range     = "443"
+    source_address_prefix      = "*"
+    destination_address_prefix = "*"
+  }
+}
+
+resource "azurerm_subnet_network_security_group_association" "nsg_assoc" {
+  subnet_id                 = "/subscriptions/.../subnets/snet-app"
+  network_security_group_id = azurerm_network_security_group.nsg.id
+}
+
+```
+### 5. How do you configure Azure Key Vault Auto-Rotation policies for encryption keys using Terraform?
+ * **Answer:** Define the key using azurerm_key_vault_key and add a nested rotation_policy block specifying the time intervals for automatic key generation and expiry alerts.
+ * **Example:**
+```hcl
+resource "azurerm_key_vault_key" "auto_key" {
+  name         = "cmk-storage-key"
+  key_vault_id = "/subscriptions/.../vaults/kv-security-prod"
+  key_type     = "RSA"
+  key_size     = 2048
+
+  key_opts = [
+    "decrypt", "encrypt", "sign", "unwrapKey", "verify", "wrapKey"
+  ]
+
+  rotation_policy {
+    automatic {
+      time_before_expiry = "P30D" # Rotate 30 days before key expiry
+    }
+
+    expire_after         = "P90D" # Set total key lifetime to 90 days
+    notify_before_expiry = "P15D" # Trigger Azure Monitor alert 15 days before expiry
+  }
+}
+
+```
+### 6. How do you enforce private network access on an Azure Container Registry (ACR) using Terraform?
+ * **Answer:** Disable public network access on the azurerm_container_registry resource (public_network_access_enabled = false) and attach a Private Endpoint (azurerm_private_endpoint) targeting the subresource registry.
+ * **Example:**
+```hcl
+resource "azurerm_container_registry" "acr" {
+  name                          = "acrsharedappprod001"
+  resource_group_name           = "rg-container-services"
+  location                      = "East US"
+  sku                           = "Premium" # Required for Private Endpoints
+  public_network_access_enabled = false    # Disables public internet access
+}
+
+resource "azurerm_private_endpoint" "acr_pe" {
+  name                = "pe-acr-prod"
+  location            = "East US"
+  resource_group_name = "rg-container-services"
+  subnet_id           = "/subscriptions/.../subnets/snet-private-endpoints"
+
+  private_service_connection {
+    name                           = "psc-acr-prod"
+    private_connection_resource_id = azurerm_container_registry.acr.id
+    is_manual_connection           = false
+    subresource_names              = ["registry"]
+  }
+}
+
+```
+### 7. How do you execute time_sleep delays between interdependent Azure resource creations?
+ * **Answer:** * Certain Azure APIs (e.g., Entra ID RBAC role propogation or Managed Identity assignments) take up to 60–90 seconds to fully propagate across regions.
+   * You can insert an explicit delay using the time_sleep resource from the hashicorp/time provider before executing downstream dependent resources.
+ * **Example:**
+```hcl
+resource "azurerm_user_assigned_identity" "identity" {
+  name                = "id-aks-keda"
+  location            = "East US"
+  resource_group_name = "rg-aks"
+}
+
+# Waits 60 seconds after identity creation to allow Entra ID propagation
+resource "time_sleep" "wait_60_seconds" {
+  depends_on      = [azurerm_user_assigned_identity.identity]
+  create_duration = "60s"
+}
+
+# Executes assignment only after the sleep duration completes
+resource "azurerm_role_assignment" "role" {
+  depends_on           = [time_sleep.wait_60_seconds]
+  scope                = "/subscriptions/.../resourceGroups/rg-data"
+  role_definition_name = "Storage Blob Data Contributor"
+  principal_id         = azurerm_user_assigned_identity.identity.principal_id
+}
+
+```
+## Advanced Level Questions
+### 8. How do you provision an Azure Application Gateway with Path-Based Routing and SSL Termination using Terraform?
+ * **Answer:** Configure azurerm_application_gateway by defining frontend_port, backend_address_pool, http_listener, and request_routing_rule blocks with PathBasedRouting type.
+ * **Example:**
+```hcl
+resource "azurerm_application_gateway" "appgw" {
+  name                = "agw-web-prod"
+  resource_group_name = "rg-networking"
+  location            = "East US"
+
+  sku {
+    name     = "Standard_v2"
+    tier     = "Standard_v2"
+    capacity = 2
+  }
+
+  gateway_ip_configuration {
+    name      = "ip-config"
+    subnet_id = "/subscriptions/.../subnets/AppGatewaySubnet"
+  }
+
+  frontend_port {
+    name = "port_80"
+    port = 80
+  }
+
+  frontend_ip_configuration {
+    name                 = "public-ip-config"
+    public_ip_address_id = "/subscriptions/.../publicIPAddresses/pip-agw"
+  }
+
+  backend_address_pool {
+    name = "default-backend-pool"
+  }
+
+  backend_http_settings {
+    name                  = "http-settings"
+    cookie_based_affinity = "Disabled"
+    port                  = 80
+    protocol              = "Http"
+    request_timeout       = 20
+  }
+
+  http_listener {
+    name                           = "http-listener"
+    frontend_ip_configuration_name = "public-ip-config"
+    frontend_port_name             = "port_80"
+    protocol                       = "Http"
+  }
+
+  request_routing_rule {
+    name                       = "routing-rule"
+    rule_type                  = "Basic"
+    http_listener_name         = "http-listener"
+    backend_address_pool_name  = "default-backend-pool"
+    backend_http_settings_name = "http-settings"
+    priority                   = 100
+  }
+}
+
+```
+### 9. How do you implement dynamic diagnostic settings across multiple Azure resources using azurerm_monitor_diagnostic_setting?
+ * **Answer:** Iterate over a map or set of resource IDs using for_each on azurerm_monitor_diagnostic_setting to stream metric and log categories into a central Log Analytics Workspace.
+ * **Example:**
+```hcl
+variable "target_resource_ids" {
+  type = map(string)
+  default = {
+    "keyvault" = "/subscriptions/.../vaults/kv-prod"
+    "storage"  = "/subscriptions/.../storageAccounts/stprod001"
+  }
+}
+
+resource "azurerm_monitor_diagnostic_setting" "diag" {
+  for_each                   = var.target_resource_ids
+  name                       = "diag-${each.key}"
+  target_resource_id         = each.value
+  log_analytics_workspace_id = "/subscriptions/.../workspaces/law-central-logs"
+
+  enabled_log {
+    category_group = "allLogs"
+  }
+
+  metric {
+    category = "AllMetrics"
+    enabled  = true
+  }
+}
+
+```
+### 10. How do you automate Terraform Plan output review in GitHub Actions using Workflow Artifacts and Comment Bot automation?
+ * **Answer:**
+   1. In the Pull Request workflow, execute terraform plan -out=tfplan.
+   2. Convert the binary plan to JSON: terraform show -json tfplan > plan.json.
+   3. Run script checks or policy evaluations (e.g., checkov or opa) against plan.json.
+   4. Post a sanitized summary of proposed changes directly as a comment on the Pull Request using GitHub Script actions.
+ * **Example GitHub Actions Step:**
+```yaml
+- name: Terraform Plan Output
+  run: |
+    terraform plan -no-color -out=tfplan
+    terraform show -no-color tfplan > plan_summary.txt
+
+- name: Comment Plan on PR
+  uses: actions/github-script@v6
+  with:
+    script: |
+      const fs = require('fs');
+      const plan = fs.readFileSync('plan_summary.txt', 'utf8');
+      github.rest.issues.createComment({
+        issue_number: context.issue.number,
+        owner: context.repo.owner,
+        repo: context.repo.repo,
+        body: `### Terraform Execution Plan Summary:\n\`\`\`hcl\n${plan.substring(0, 6000)}\n\`\`\``
+      })
+
+```
+
 
